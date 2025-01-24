@@ -2,12 +2,15 @@ import base64
 import json
 import os
 import re
-import shutil
+import tempfile
+import time
 from enum import Enum
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import click
 import requests
 import toml
+from nomad.config import config
 
 
 class OasisURLs(Enum):
@@ -73,6 +76,14 @@ def fetch_file_created(repo_name: str, file_path: str, headers: dict) -> str:
 
 
 def fetch_nomad_deployment_toml(toml_url: str) -> dict:
+    """
+    Fetches and parses a `pyproject.toml` file from a given URL.
+    Args:
+        toml_url (str): The URL of the `pyproject.toml` file.
+    Returns:
+        dict: A dictionary containing the parsed `pyproject.toml` file if successful,
+              otherwise an empty dictionary.
+    """
     response = requests.get(toml_url)
     if not response.ok:
         msg = f'Failed to get pyproject.toml from {toml_url}: {response.text}'
@@ -147,13 +158,13 @@ def get_toml_project(url: str, subdirectory: str, headers: dict) -> dict:
     return {}
 
 
-def on_gitlab_toml(plugin_name: str, pyproject_data: dict) -> bool:
+def in_distribution_toml(plugin_name: str, pyproject_data: dict) -> bool:
     """
     Checks if a given plugin name is listed in the plugin dependencies of a
-    pyproject.toml filea.
+    pyproject.toml file.
     Args:
         plugin_name (str): The name of the plugin to check for.
-        toml_data (dict): An dictionary containing the pyproject toml data
+        toml_data (dict): An dictionary containing the pyproject toml data.
     Returns:
         bool: True if the plugin name is found in the optional dependencies, False
               otherwise.
@@ -268,8 +279,7 @@ def get_entry_points(toml_project: dict) -> dict:
 
 
 def get_plugin(
-    *, item: dict, headers: dict, central_toml_data: dict, oasis_toml_data: dict
-) -> dict:
+    item: dict, headers: dict, central_toml: dict, example_oasis_toml: dict) -> dict:
     """
     Extracts plugin information from a given repository item and returns it as a
     dictionary.
@@ -278,6 +288,8 @@ def get_plugin(
                      repository details and file path.
         headers (dict): A dictionary containing HTTP headers for making requests to
                         external services.
+        central_toml (dict): Central distribution pyproject toml data.
+        example_oasis_toml (dict): Example oasis pyproject toml data.
     Returns:
         dict: A dictionary containing the extracted plugin information, including
               repository details, project metadata, and plugin-specific attributes.
@@ -312,8 +324,8 @@ def get_plugin(
         authors=project.get('authors', []),
         maintainers=project.get('maintainers', []),
         plugin_dependencies=find_dependencies(project, headers),
-        on_central=on_gitlab_toml(name, central_toml_data),
-        on_example_oasis=on_gitlab_toml(name, oasis_toml_data),
+        on_central=in_distribution_toml(name, central_toml),
+        on_example_oasis=in_distribution_toml(name, example_oasis_toml),
         on_pypi=requests.get(f'https://pypi.org/pypi/{name}/json').ok,
         plugin_entry_points=get_entry_points(project),
     )
@@ -321,7 +333,7 @@ def get_plugin(
     return plugin
 
 
-def find_plugins(token: str, *, central_toml_data: dict, oasis_toml_data: dict) -> dict:
+def find_plugins(token: str, central_toml: dict, example_oasis_toml: dict) -> dict:
     """
     Find and retrieve Nomad plugins from GitHub repositories.
     This function searches for repositories containing Nomad plugins by querying
@@ -329,8 +341,8 @@ def find_plugins(token: str, *, central_toml_data: dict, oasis_toml_data: dict) 
     have 'nomad.plugin' entry points defined in their `pyproject.toml` files.
     Args:
         token (str): GitHub personal access token for authentication.
-        central_toml_data (dict): Central distribution pyproject toml data
-        oasis_toml_data (dict): Example oasis pyproject toml data
+        central_toml (dict): Central distribution pyproject toml data.
+        example_oasis_toml (dict): Example oasis pyproject toml data.
     Returns:
         dict: A dictionary where keys are plugin names (repository full names with
               slashes replaced by underscores) and values are the plugin data.
@@ -376,8 +388,8 @@ def find_plugins(token: str, *, central_toml_data: dict, oasis_toml_data: dict) 
                 plugins[plugin_name] = get_plugin(
                     item=item,
                     headers=headers,
-                    central_toml_data=central_toml_data,
-                    oasis_toml_data=oasis_toml_data,
+                    central_toml=central_toml,
+                    example_oasis_toml=example_oasis_toml,
                 )
                 bar.update(1)
             if 'next' in response.links:
@@ -385,26 +397,6 @@ def find_plugins(token: str, *, central_toml_data: dict, oasis_toml_data: dict) 
             else:
                 break
     return plugins
-
-
-def save_plugins(plugins: dict, save_path: str) -> None:
-    """
-    Save plugins to JSON files and create a zip archive of the saved files.
-    Args:
-        plugins (dict): A dictionary where keys are plugin names and values are plugin
-                        data.
-        save_path (str): The directory path where the JSON files will be saved and the
-                         zip archive will be created.
-    Returns:
-        None
-    """
-
-    for name, plugin in plugins.items():
-        save_file = os.path.join(save_path, f'{name}.archive.json')
-        with open(save_file, 'w') as f:
-            json.dump({'data': plugin}, f, indent=4)
-
-    shutil.make_archive(save_path, 'zip', save_path)
 
 
 def get_authentication_token(nomad_url: str, username: str, password: str) -> str:
@@ -437,80 +429,143 @@ def get_authentication_token(nomad_url: str, username: str, password: str) -> st
         return
 
 
-def upload_to_NOMAD(nomad_url: str, token: str, upload_file: str) -> str:
+def upload_to_NOMAD(
+        nomad_url: str, token: str, plugins: dict, upload_id: str=None) -> str:
     """
     Uploads a file to the NOMAD server.
     Args:
-        nomad_url (str): The URL of the NOMAD server.
+        nomad_url (str): The URL of the NOMAD api, 
+                         e.g. http://nomad-lab.eu/prod/v1/api/v1/.
         token (str): The authorization token for accessing the NOMAD server.
-        upload_file (str): The path to the file to be uploaded.
+        plugins (dict): A dictionary where keys are plugin names and values are plugin
+                        data
+        upload_id (str): The ID of the upload if pushing to and existing upload.
     Returns:
         str: The upload ID if the upload is successful, otherwise None.
     """
+    with tempfile.TemporaryDirectory(dir=config.fs.tmp) as temp_dir:
+        files = []
+        for name, plugin in plugins.items():
+            files.append(os.path.join(temp_dir, f'{name}.archive.json'))
+            with open(files[-1], 'w') as f:
+                json.dump({'data': plugin}, f, indent=4)
 
-    with open(upload_file, 'rb') as f:
-        try:
-            response = requests.post(
-                nomad_url + 'uploads',
-                headers={
-                    'Authorization': f'Bearer {token}',
-                    'Accept': 'application/json',
-                },
-                data=f,
-                timeout=30,
-            )
-            upload_id = response.json().get('upload_id')
-            if upload_id:
-                return upload_id
+        zip_file = os.path.join(temp_dir, 'plugins.zip')
+        with ZipFile(zip_file, 'w', ZIP_DEFLATED, allowZip64=True) as zf:
+            for file in files:
+                zf.write(file, os.path.basename(file))
 
-            click.echo('response is missing upload_id: ')
-            click.echo(response.json())
-            return
-        except Exception:
-            click.echo('something went wrong uploading to NOMAD')
-            return
+        with open(zip_file, 'rb') as f:
+            try:
+                if not upload_id:
+                    response = requests.post(
+                        nomad_url + 'uploads/',
+                        headers={
+                            'Authorization': f'Bearer {token}',
+                            'Accept': 'application/json',
+                        },
+                        data=f,
+                        timeout=30,
+                    )
+                else:
+                    response = requests.put(
+                        nomad_url + f'uploads/{upload_id}/raw/',
+                        headers={
+                            'Authorization': f'Bearer {token}',
+                            'Accept': 'application/json',
+                        },
+                        data=f,
+                        timeout=30,
+                    )
+                upload_id = response.json().get('upload_id')
+                if upload_id:
+                    return upload_id
+
+                click.echo('response is missing upload_id: ')
+                click.echo(response.json())
+                return
+            except Exception:
+                click.echo('something went wrong uploading to NOMAD')
+                return
+
+
+def wait_for_processing(nomad_url, upload_id, token, timeout=1800, interval=10):
+    """
+    Waits for the processing of the upload to be completed.
+    Args:
+        nomad_url (str): URL of the NOMAD service.
+        upload_id (str): ID of the upload.
+        token (str): Authentication token.
+        timeout (int): Timeout in seconds.
+        interval (int): Polling interval in seconds.
+    Returns:
+        bool: True if processing is complete, False if timeout is reached.
+    """
+    headers = {'Authorization': f'Bearer {token}'}
+    url = f'{nomad_url}uploads/{upload_id}'
+    start_time = time.time()
+
+    while time.time() - start_time < timeout:
+        response = requests.get(url, headers=headers)
+        if response.ok:
+            running = response.json().get('data', {}).get('process_running')
+            if not running:
+                return True
+        time.sleep(interval)
+
+    return False
 
 
 @click.command()
-@click.option(
-    '--github-token', prompt='GitHub Token', help='Your GitHub personal access token.'
-)
-@click.option('--nomad-url', prompt='NOMAD URL', help='The NOMAD upload URL.')
-@click.option('--nomad-username', prompt='NOMAD Username', help='Your NOMAD username.')
-@click.option(
-    '--nomad-password',
-    prompt='NOMAD Password',
-    help='Your NOMAD upload password.',
-    hide_input=True,
-)
-@click.option(
-    '--save-path', prompt='Save Path', help='The path to save the plugin archives.'
-)
-def main(github_token, nomad_url, nomad_username, nomad_password, save_path):
+def main():
     """
-    Main function to find plugins, save them, and upload to NOMAD.
-    Args:
-        github_token (str): GitHub token for authentication to access plugins.
-        nomad_url (str): URL of the NOMAD service.
-        nomad_username (str): Username for NOMAD authentication.
-        nomad_password (str): Password for NOMAD authentication.
-        save_path (str): Path to save the plugins data.
-    Returns:
-        None
+    Main function to find plugins and upload them to NOMAD.
     """
-    oasis_toml_data = fetch_nomad_deployment_toml(OasisURLs.EXAMPLE.value)
-    central_toml_data = fetch_nomad_deployment_toml(OasisURLs.CENTRAL.value)
+    from nomad.config import _plugins  # Workaround
+    try:
+        entry_point = 'nomad_plugins.apps:plugin_app_entry_point'
+        app_options = _plugins['entry_points']['options'][entry_point]
+        github_token = app_options['github_api_token']
+    except KeyError:
+        click.echo('Could not find github_api_token in nomad.yaml, exiting.')
+        return
+    try:
+        upload_id = app_options['upload_id']
+    except KeyError:
+        upload_id = None
+        click.echo('Could not find upload_id in nomad.yaml, uploading as new upload.')
+    if config.client.url is None:
+        click.echo('NOMAD client url is not set in nomad.yaml, exiting.')
+        return
+    if config.client.user is None or config.client.password is None:
+        click.echo('NOMAD client user or password is not set in nomad.yaml, exiting.')
+        return
+    nomad_url = f'{config.client.url}/v1/'
+    token = get_authentication_token(
+        nomad_url, config.client.user, config.client.password)
+    if not token:
+        return
+    example_oasis_toml = fetch_nomad_deployment_toml(OasisURLs.EXAMPLE.value)
+    central_toml = fetch_nomad_deployment_toml(OasisURLs.CENTRAL.value)
 
     plugins = find_plugins(
         github_token,
-        central_toml_data=central_toml_data,
-        oasis_toml_data=oasis_toml_data,
+        central_toml=central_toml,
+        example_oasis_toml=example_oasis_toml,
     )
-    save_plugins(plugins, save_path)
-    token = get_authentication_token(nomad_url, nomad_username, nomad_password)
-    if token:
-        upload_id = upload_to_NOMAD(nomad_url, token, save_path + '.zip')
-        click.echo(f'Uploaded to NOMAD upload: {upload_id}')
+    
+    upload_id = upload_to_NOMAD(nomad_url, token, plugins, upload_id)
+    click.echo(f'Uploaded to NOMAD upload: {upload_id}')
+    click.echo(f'Waiting for processing of upload {upload_id} to complete...')
+    if wait_for_processing(nomad_url, upload_id, token, timeout=1800):
+        click.echo(f'First processing of upload {upload_id} is complete.')
+        headers = {'Authorization': f'Bearer {token}'}
+        url = f'{nomad_url}uploads/{upload_id}/action/process'
+        response = requests.post(url, headers=headers)
+        if response.ok:
+            click.echo(f'Second processing of upload {upload_id} has been triggered.')
+    else:
+        click.echo(f'Timeout reached while waiting for upload {upload_id} to process.')
 
 
 if __name__ == '__main__':

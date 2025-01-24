@@ -72,6 +72,18 @@ def fetch_file_created(repo_name: str, file_path: str, headers: dict) -> str:
     return None
 
 
+def fetch_nomad_deployment_toml(toml_url: str) -> dict:
+    response = requests.get(toml_url)
+    if not response.ok:
+        msg = f'Failed to get pyproject.toml from {toml_url}: {response.text}'
+        click.echo(msg)
+    try:
+        return toml.loads(response.text)
+    except toml.TomlDecodeError as e:
+        click.echo(f'Failed to parse pyproject.toml from {toml_url}: {e}')
+        return {}
+
+
 def fetch_repo_details(repo_full_name: str, headers: dict) -> dict:
     """
     Fetches the details of a GitHub repository using the GitHub API.
@@ -135,27 +147,17 @@ def get_toml_project(url: str, subdirectory: str, headers: dict) -> dict:
     return {}
 
 
-def on_gitlab_oasis(plugin_name: str, oasis_toml: OasisURLs) -> bool:
+def on_gitlab_toml(plugin_name: str, pyproject_data: dict) -> bool:
     """
     Checks if a given plugin name is listed in the plugin dependencies of a
-    pyproject.toml file located at a specified URL.
+    pyproject.toml filea.
     Args:
         plugin_name (str): The name of the plugin to check for.
-        oasis_toml (OasisURLs): An object containing the URL to the pyproject.toml file.
+        toml_data (dict): An dictionary containing the pyproject toml data
     Returns:
         bool: True if the plugin name is found in the optional dependencies, False
               otherwise.
     """
-
-    response = requests.get(oasis_toml.value)
-    if not response.ok:
-        msg = f'Failed to get pyproject.toml from {oasis_toml.value}: {response.text}'
-        click.echo(msg)
-    try:
-        pyproject_data = toml.loads(response.text)
-    except toml.TomlDecodeError as e:
-        click.echo(f'Failed to parse pyproject.toml from {oasis_toml.value}: {e}')
-        return False
     name_pattern = re.compile(r'^[^;>=<\s]+')
     plugin_dependencies = pyproject_data['project']['optional-dependencies']['plugins']
     return plugin_name in [name_pattern.match(d).group() for d in plugin_dependencies]
@@ -265,7 +267,9 @@ def get_entry_points(toml_project: dict) -> dict:
     return plugin_entry_points
 
 
-def get_plugin(item: dict, headers: dict) -> dict:
+def get_plugin(
+    *, item: dict, headers: dict, central_toml_data: dict, oasis_toml_data: dict
+) -> dict:
     """
     Extracts plugin information from a given repository item and returns it as a
     dictionary.
@@ -308,8 +312,8 @@ def get_plugin(item: dict, headers: dict) -> dict:
         authors=project.get('authors', []),
         maintainers=project.get('maintainers', []),
         plugin_dependencies=find_dependencies(project, headers),
-        on_central=on_gitlab_oasis(name, OasisURLs.CENTRAL),
-        on_example_oasis=on_gitlab_oasis(name, OasisURLs.EXAMPLE),
+        on_central=on_gitlab_toml(name, central_toml_data),
+        on_example_oasis=on_gitlab_toml(name, oasis_toml_data),
         on_pypi=requests.get(f'https://pypi.org/pypi/{name}/json').ok,
         plugin_entry_points=get_entry_points(project),
     )
@@ -317,7 +321,7 @@ def get_plugin(item: dict, headers: dict) -> dict:
     return plugin
 
 
-def find_plugins(token: str) -> dict:
+def find_plugins(token: str, *, central_toml_data: dict, oasis_toml_data: dict) -> dict:
     """
     Find and retrieve Nomad plugins from GitHub repositories.
     This function searches for repositories containing Nomad plugins by querying
@@ -325,6 +329,8 @@ def find_plugins(token: str) -> dict:
     have 'nomad.plugin' entry points defined in their `pyproject.toml` files.
     Args:
         token (str): GitHub personal access token for authentication.
+        central_toml_data (dict): Central distribution pyproject toml data
+        oasis_toml_data (dict): Example oasis pyproject toml data
     Returns:
         dict: A dictionary where keys are plugin names (repository full names with
               slashes replaced by underscores) and values are the plugin data.
@@ -367,7 +373,12 @@ def find_plugins(token: str) -> dict:
             total_items = search_results['total_count']
             for item in search_results['items']:
                 plugin_name = item['repository']['full_name'].replace('/', '_')
-                plugins[plugin_name] = get_plugin(item, headers)
+                plugins[plugin_name] = get_plugin(
+                    item=item,
+                    headers=headers,
+                    central_toml_data=central_toml_data,
+                    oasis_toml_data=oasis_toml_data,
+                )
                 bar.update(1)
             if 'next' in response.links:
                 page += 1
@@ -487,8 +498,14 @@ def main(github_token, nomad_url, nomad_username, nomad_password, save_path):
     Returns:
         None
     """
+    oasis_toml_data = fetch_nomad_deployment_toml(OasisURLs.EXAMPLE.value)
+    central_toml_data = fetch_nomad_deployment_toml(OasisURLs.CENTRAL.value)
 
-    plugins = find_plugins(github_token)
+    plugins = find_plugins(
+        github_token,
+        central_toml_data=central_toml_data,
+        oasis_toml_data=oasis_toml_data,
+    )
     save_plugins(plugins, save_path)
     token = get_authentication_token(nomad_url, nomad_username, nomad_password)
     if token:

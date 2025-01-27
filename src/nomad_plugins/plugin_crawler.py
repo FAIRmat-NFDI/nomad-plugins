@@ -348,7 +348,7 @@ def find_plugins(token: str, central_toml: dict, example_oasis_toml: dict) -> di
               slashes replaced by underscores) and values are the plugin data.
     """
 
-    query = "project.entry-points.'nomad.plugin' in:file filename:pyproject.toml"
+    query = 'nomad.plugin in:file filename:pyproject.toml'
     params = {
         'q': query,
         'sort': 'stars',
@@ -517,32 +517,69 @@ def wait_for_processing(nomad_url, upload_id, token, timeout=1800, interval=10):
 
 
 @click.command()
-def main():
+@click.option(
+    '--github-token',
+    prompt='GitHub personal access token',
+    help='Your GitHub personal access token to use when querying for plugins.',
+    hide_input=True,
+)
+@click.option(
+    '--nomad-username',
+    prompt='NOMAD username',
+    help='NOMAD username for the owner of the plugins upload.'
+)
+@click.option(
+    '--nomad-password',
+    prompt='NOMAD password',
+    help='NOMAD password for the owner of the plugins upload.',
+    hide_input=True,
+)
+@click.option(
+    '--nomad-url',
+    default=None,
+    help='The NOMAD API URL, defaults to client.url in nomad.yaml.',
+)
+@click.option(
+    '--upload-id',
+    default=None,
+    help='Optional upload ID for updating an existing upload.',
+)
+def main(github_token, nomad_url, nomad_username, nomad_password, upload_id):
     """
-    Main function to find plugins and upload them to NOMAD.
+    Crawl GitHub repositories for NOMAD plugins and upload them to the NOMAD server.
+
+    The nomad-url can be provided as an argument or in the nomad.yaml config file as:
+    ```yaml
+    client:
+        url: <nomad-url>
+    ```
+
+    The upload-id can be provided as an argument or in the nomad.yaml config file as:
+    ```yaml
+    plugins:
+        entry_points:
+            options:
+                nomad_plugins.apps:plugin_app_entry_point:
+                    upload_id: <upload-id>
+    ```
     """
-    from nomad.config import _plugins  # Workaround
-    try:
-        entry_point = 'nomad_plugins.apps:plugin_app_entry_point'
-        app_options = _plugins['entry_points']['options'][entry_point]
-        github_token = app_options['github_api_token']
-    except KeyError:
-        click.echo('Could not find github_api_token in nomad.yaml, exiting.')
-        return
-    try:
-        upload_id = app_options['upload_id']
-    except KeyError:
-        upload_id = None
-        click.echo('Could not find upload_id in nomad.yaml, uploading as new upload.')
-    if config.client.url is None:
-        click.echo('NOMAD client url is not set in nomad.yaml, exiting.')
-        return
-    if config.client.user is None or config.client.password is None:
-        click.echo('NOMAD client user or password is not set in nomad.yaml, exiting.')
-        return
-    nomad_url = f'{config.client.url}/v1/'
-    token = get_authentication_token(
-        nomad_url, config.client.user, config.client.password)
+    if upload_id is None:
+        config.load_plugins()
+        try:
+            entry_point = 'nomad_plugins.schema_packages:schema_package_entry_point'
+            app_options = config.plugins.entry_points.options[entry_point]
+            upload_id = app_options.upload_id
+        except (KeyError, AttributeError):
+            upload_id = None
+            click.echo('No upload-id specified, uploading as new upload.')
+    if nomad_url is None:
+        if config.client.url is None:
+            click.echo('NOMAD url is not provided or set in nomad.yaml, exiting.')
+            return
+        nomad_url = f'{config.client.url}/v1/'
+    if not nomad_url.endswith('/'):
+        nomad_url += '/'
+    token = get_authentication_token(nomad_url, nomad_username, nomad_password)
     if not token:
         return
     example_oasis_toml = fetch_nomad_deployment_toml(OasisURLs.EXAMPLE.value)

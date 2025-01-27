@@ -20,7 +20,7 @@ filters_locked = {
 # Workaround: read the upload_ids from plugin's raw config.
 try:
     upload_id = _plugins['entry_points']['options'][
-        'nomad_plugins.apps:plugin_app_entry_point']['upload_id']
+        'nomad_plugins.schema_packages:schema_package_entry_point']['upload_id']
 except KeyError:
     upload_id = None
 

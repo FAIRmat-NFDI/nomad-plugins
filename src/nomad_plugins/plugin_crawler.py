@@ -549,19 +549,23 @@ def main(github_token, nomad_url, nomad_username, nomad_password, upload_id):
     Crawl GitHub repositories for NOMAD plugins and upload them to the NOMAD server.
 
     The nomad-url can be provided as an argument or in the nomad.yaml config file as:
-    ```yaml
+
     client:
+
         url: <nomad-url>
-    ```
 
     The upload-id can be provided as an argument or in the nomad.yaml config file as:
-    ```yaml
+    
     plugins:
+
         entry_points:
+
             options:
+
                 nomad_plugins.apps:plugin_app_entry_point:
+                
                     upload_id: <upload-id>
-    ```
+
     """
     if upload_id is None:
         config.load_plugins()

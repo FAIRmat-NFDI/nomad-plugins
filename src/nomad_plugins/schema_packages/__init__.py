@@ -3,7 +3,7 @@ from pydantic import Field
 
 
 class PluginSchemaPackageEntryPoint(SchemaPackageEntryPoint):
-    github_api_token: str = Field('', description='Custom configuration parameter')
+    upload_id: str = Field('', description='The main upload id for the plugins.')
 
     def load(self):
         from nomad_plugins.schema_packages.plugin import m_package

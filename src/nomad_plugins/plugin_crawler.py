@@ -2,6 +2,7 @@ import base64
 import json
 import os
 import re
+import sys
 import tempfile
 import time
 from enum import Enum
@@ -516,6 +517,39 @@ def wait_for_processing(nomad_url, upload_id, token, timeout=1800, interval=10):
     return False
 
 
+def get_upload_args(nomad_url, nomad_username, nomad_password, upload_id) -> tuple:
+    """
+    Get the NOMAD upload arguments from the command line or config file.
+    Args:
+        nomad_url (str): The NOMAD API URL.
+        nomad_username (str): The NOMAD username.
+        nomad_password (str): The NOMAD password.
+        upload_id (str): The upload ID.
+    Returns:
+        tuple: A tuple containing the NOMAD URL, token, and upload ID.
+    """
+    if upload_id is None:
+        config.load_plugins()
+        try:
+            entry_point = 'nomad_plugins.schema_packages:schema_package_entry_point'
+            app_options = config.plugins.entry_points.options[entry_point]
+            upload_id = app_options.upload_id
+        except (KeyError, AttributeError):
+            upload_id = None
+            click.echo('No upload-id specified, uploading as new upload.')
+    if nomad_url is None:
+        if config.client.url is None:
+            click.echo('NOMAD url is not provided or set in nomad.yaml, exiting.')
+            return
+        nomad_url = f'{config.client.url}/v1/'
+    if not nomad_url.endswith('/'):
+        nomad_url += '/'
+    nomad_token = get_authentication_token(nomad_url, nomad_username, nomad_password)
+    if not nomad_token:
+        sys.exit(1)
+    return nomad_url, nomad_token, upload_id
+
+
 @click.command()
 @click.option(
     '--github-token',
@@ -567,25 +601,10 @@ def main(github_token, nomad_url, nomad_username, nomad_password, upload_id):
                     upload_id: <upload-id>
 
     """
-    if upload_id is None:
-        config.load_plugins()
-        try:
-            entry_point = 'nomad_plugins.schema_packages:schema_package_entry_point'
-            app_options = config.plugins.entry_points.options[entry_point]
-            upload_id = app_options.upload_id
-        except (KeyError, AttributeError):
-            upload_id = None
-            click.echo('No upload-id specified, uploading as new upload.')
-    if nomad_url is None:
-        if config.client.url is None:
-            click.echo('NOMAD url is not provided or set in nomad.yaml, exiting.')
-            return
-        nomad_url = f'{config.client.url}/v1/'
-    if not nomad_url.endswith('/'):
-        nomad_url += '/'
-    token = get_authentication_token(nomad_url, nomad_username, nomad_password)
-    if not token:
-        return
+    nomad_url, nomad_token, upload_id = get_upload_args(
+        nomad_url, nomad_username, nomad_password, upload_id
+    )
+    
     example_oasis_toml = fetch_nomad_deployment_toml(OasisURLs.EXAMPLE.value)
     central_toml = fetch_nomad_deployment_toml(OasisURLs.CENTRAL.value)
 
@@ -595,12 +614,12 @@ def main(github_token, nomad_url, nomad_username, nomad_password, upload_id):
         example_oasis_toml=example_oasis_toml,
     )
     
-    upload_id = upload_to_NOMAD(nomad_url, token, plugins, upload_id)
+    upload_id = upload_to_NOMAD(nomad_url, nomad_token, plugins, upload_id)
     click.echo(f'Uploaded to NOMAD upload: {upload_id}')
     click.echo(f'Waiting for processing of upload {upload_id} to complete...')
-    if wait_for_processing(nomad_url, upload_id, token, timeout=1800):
+    if wait_for_processing(nomad_url, upload_id, nomad_token, timeout=1800):
         click.echo(f'First processing of upload {upload_id} is complete.')
-        headers = {'Authorization': f'Bearer {token}'}
+        headers = {'Authorization': f'Bearer {nomad_token}'}
         url = f'{nomad_url}uploads/{upload_id}/action/process'
         response = requests.post(url, headers=headers)
         if response.ok:

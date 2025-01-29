@@ -1,3 +1,8 @@
+![](https://github.com/FAIRmat-NFDI/nomad-plugins/actions/workflows/python-publish.yml/badge.svg)
+![](https://img.shields.io/pypi/pyversions/nomad-plugins)
+![](https://img.shields.io/pypi/l/nomad-plugins)
+![](https://img.shields.io/pypi/v/nomad-plugins)
+
 # NOMAD Plugins
 
 A plugin for discovering other plugins.

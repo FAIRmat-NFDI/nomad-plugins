@@ -1,3 +1,4 @@
+from nomad.config import _plugins
 from nomad.config.models.plugins import AppEntryPoint
 from nomad.config.models.ui import (
     App,
@@ -11,6 +12,20 @@ from nomad.config.models.ui import (
 )
 
 schema = 'nomad_plugins.schema_packages.plugin.Plugin'
+filters_locked = {
+    'section_defs.definition_qualified_name': [schema], 
+    'entry_type': 'Plugin',
+}
+
+# Workaround: read the upload_ids from plugin's raw config.
+try:
+    upload_id = _plugins['entry_points']['options'][
+        'nomad_plugins.schema_packages:schema_package_entry_point']['upload_id']
+except KeyError:
+    upload_id = None
+
+if upload_id:
+    filters_locked['upload_id'] = upload_id
 
 plugin_app_entry_point = AppEntryPoint(
     name='NOMAD plugins',
@@ -119,8 +134,6 @@ plugin_app_entry_point = AppEntryPoint(
                 ),
             ],
         ),
-        filters_locked={
-            'entry_type': 'Plugin',
-        },
+        filters_locked=filters_locked,
     ),
 )

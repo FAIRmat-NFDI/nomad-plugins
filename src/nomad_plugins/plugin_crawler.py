@@ -280,7 +280,7 @@ def get_entry_points(toml_project: dict) -> dict:
 
 
 def get_plugin(
-    item: dict, headers: dict, central_toml: dict, example_oasis_toml: dict) -> dict:
+    *, item: dict, headers: dict, central_toml: dict, example_oasis_toml: dict) -> dict:
     """
     Extracts plugin information from a given repository item and returns it as a
     dictionary.
@@ -426,7 +426,6 @@ def get_authentication_token(nomad_url: str, username: str, password: str) -> st
         click.echo(response.json())
         return
     except Exception:
-        click.echo('something went wrong trying to get authentication token')
         return
 
 
@@ -490,7 +489,13 @@ def upload_to_NOMAD(
                 return
 
 
-def wait_for_processing(nomad_url, upload_id, token, timeout=1800, interval=10):
+def wait_for_processing(
+        nomad_url: str, 
+        upload_id: str, 
+        token: str, 
+        timeout: int=1800, 
+        interval: int=10,
+    ) -> bool:
     """
     Waits for the processing of the upload to be completed.
     Args:
@@ -517,7 +522,12 @@ def wait_for_processing(nomad_url, upload_id, token, timeout=1800, interval=10):
     return False
 
 
-def get_upload_args(nomad_url, nomad_username, nomad_password, upload_id) -> tuple:
+def get_upload_args(
+        nomad_url: str, 
+        nomad_username: str, 
+        nomad_password: str, 
+        upload_id: str,
+    ) -> tuple:
     """
     Get the NOMAD upload arguments from the command line or config file.
     Args:
@@ -540,12 +550,13 @@ def get_upload_args(nomad_url, nomad_username, nomad_password, upload_id) -> tup
     if nomad_url is None:
         if config.client.url is None:
             click.echo('NOMAD url is not provided or set in nomad.yaml, exiting.')
-            return
+            sys.exit(1)
         nomad_url = f'{config.client.url}/v1/'
     if not nomad_url.endswith('/'):
         nomad_url += '/'
     nomad_token = get_authentication_token(nomad_url, nomad_username, nomad_password)
     if not nomad_token:
+        click.echo('Failed to fetch nomad authentication token') 
         sys.exit(1)
     return nomad_url, nomad_token, upload_id
 

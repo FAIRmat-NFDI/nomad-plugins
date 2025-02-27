@@ -1,28 +1,344 @@
-import base64
-import json
+import asyncio
+import math
 import os
 import re
 import sys
 import tempfile
 import time
+from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import click
+import httpx
 import requests
 import toml
 from nomad.config import config
+from pydantic import BaseModel, Field, HttpUrl, TypeAdapter, model_validator
+
+
+def extract_dependency_name(dependency_string: str) -> str:
+    """Extracts the core dependency name from a dependency string,
+    removing version specifiers, comments, and git repository references.
+
+    Args:
+        dependency_string: A string representing a dependency, potentially
+                        including version specifiers, comments, or git
+                        repository references.
+
+    Returns:
+        The extracted dependency name, stripped of any extra information.
+    """
+    # Remove comments and markers (anything after # and ;)
+    dependency_string = dependency_string.split('#')[0].strip().split(';')[0].strip()
+
+    # Remove version specifiers (e.g., >=1.2.3, ==2.0) using regex
+    dependency_string = re.sub(r'[<>=~!].*', '', dependency_string).strip()
+
+    # Remove git repository references (e.g., @ git+https://...) using regex
+    dependency_string = re.sub(r'\s*@\s*git\+.*', '', dependency_string).strip()
+
+    # Remove extras markers eg. "requests; extra == 'security'"
+    dependency_string = re.sub(r'\s*;\s*extra.*', '', dependency_string).strip()
+
+    return dependency_string
+
+
+class GitHubOwner(BaseModel):
+    login: str
+    id: int
+    node_id: str
+    avatar_url: HttpUrl
+    gravatar_id: str
+    url: HttpUrl
+    html_url: HttpUrl
+    followers_url: str
+    following_url: str
+    gists_url: str
+    starred_url: str
+    subscriptions_url: HttpUrl
+    organizations_url: HttpUrl
+    repos_url: HttpUrl
+    events_url: str
+    received_events_url: HttpUrl
+    type: str
+    site_admin: bool
+    user_view_type: str | None
+
+
+class GitHubRepository(BaseModel):
+    id: int
+    node_id: str
+    name: str
+    full_name: str
+    private: bool
+    owner: GitHubOwner
+    html_url: HttpUrl
+    description: str | None
+    fork: bool
+    url: HttpUrl
+    forks_url: HttpUrl
+    keys_url: str
+    collaborators_url: str
+    teams_url: HttpUrl
+    hooks_url: HttpUrl
+    issue_events_url: str
+    events_url: HttpUrl
+    assignees_url: str
+    branches_url: str
+    tags_url: HttpUrl
+    blobs_url: str
+    git_tags_url: str
+    git_refs_url: str
+    trees_url: str
+    statuses_url: str
+    languages_url: HttpUrl
+    stargazers_url: HttpUrl
+    contributors_url: HttpUrl
+    subscribers_url: HttpUrl
+    subscription_url: HttpUrl
+    commits_url: str
+    git_commits_url: str
+    comments_url: str
+    issue_comment_url: str
+    contents_url: str
+    compare_url: str
+    merges_url: HttpUrl
+    archive_url: str
+    downloads_url: HttpUrl
+    issues_url: str
+    pulls_url: str
+    milestones_url: str
+    notifications_url: str
+    labels_url: str
+    releases_url: str
+    deployments_url: HttpUrl
+
+
+class License(BaseModel):
+    key: str | None = None
+    name: str | None = None
+    spdx_id: str | None = None
+    url: HttpUrl | None = None
+    node_id: str | None = None
+
+
+class GitHubRepositoryDetailed(BaseModel):
+    id: int
+    node_id: str
+    name: str
+    full_name: str
+    private: bool
+    owner: GitHubOwner
+    html_url: HttpUrl
+    description: str | None = None
+    fork: bool
+    url: HttpUrl
+    forks_url: HttpUrl
+    keys_url: str
+    collaborators_url: str
+    teams_url: HttpUrl
+    hooks_url: HttpUrl
+    issue_events_url: str
+    events_url: HttpUrl
+    assignees_url: str
+    branches_url: str
+    tags_url: HttpUrl
+    blobs_url: str
+    git_tags_url: str
+    git_refs_url: str
+    trees_url: str
+    statuses_url: str
+    languages_url: HttpUrl
+    stargazers_url: HttpUrl
+    contributors_url: HttpUrl
+    subscribers_url: HttpUrl
+    subscription_url: HttpUrl
+    commits_url: str
+    git_commits_url: str
+    comments_url: str
+    issue_comment_url: str
+    contents_url: str
+    compare_url: str
+    merges_url: HttpUrl
+    archive_url: str
+    downloads_url: HttpUrl
+    issues_url: str
+    pulls_url: str
+    milestones_url: str
+    notifications_url: str
+    labels_url: str
+    releases_url: str
+    deployments_url: HttpUrl
+    created_at: str  # ISO 8601 date
+    updated_at: str  # ISO 8601 date
+    pushed_at: str  # ISO 8601 date
+    git_url: str
+    ssh_url: str
+    clone_url: HttpUrl
+    svn_url: HttpUrl
+    homepage: str | None
+    size: int
+    stargazers_count: int
+    watchers_count: int
+    language: str | None
+    has_issues: bool
+    has_projects: bool
+    has_downloads: bool
+    has_wiki: bool
+    has_pages: bool
+    has_discussions: bool
+    forks_count: int
+    mirror_url: str | None
+    archived: bool
+    disabled: bool
+    open_issues_count: int
+    license: License | None
+    allow_forking: bool
+    is_template: bool
+    web_commit_signoff_required: bool
+    topics: list[str]
+    visibility: str
+    forks: int
+    open_issues: int
+    watchers: int
+    default_branch: str
+    permissions: dict
+    template_repository: Any = None
+    network_count: int
+    subscribers_count: int
+
+
+class GitHubSearchResultItem(BaseModel):
+    name: str
+    path: str
+    sha: str
+    url: HttpUrl
+    git_url: HttpUrl
+    html_url: HttpUrl
+    repository: GitHubRepository
+    score: float
+
+
+class Author(BaseModel):
+    name: str | None = None
+    email: str | None = None
+
+
+class LicenseInfo(BaseModel):
+    file: str | None = None
+    text: str | None = None
+
+
+class URLs(BaseModel):
+    Homepage: HttpUrl | None = Field(None, alias='homepage')
+    Bug_Tracker: HttpUrl | None = Field(None, alias='bug_tracker')
+
+
+class NomadPlugin(BaseModel):
+    m_def: str = 'nomad_plugins.schema_packages.plugin.PluginEntryPoint'
+    name: str
+    module: str
+    type: str | None
+
+
+class EntryPoints(BaseModel):
+    nomad_plugin: list[NomadPlugin] | None = None
+
+    @model_validator(mode='before')
+    @classmethod
+    def plugin_type(cls, values):
+        if nomad_plugins := values.pop('nomad.plugin', []):
+            result = []
+            for name, entry_point in nomad_plugins.items():
+                plugin_type = None
+                if 'schema' in entry_point or 'schema' in name:
+                    plugin_type = 'Schema package'
+                elif 'parser' in entry_point or 'parser' in name:
+                    plugin_type = 'Parser'
+                elif 'normalizer' in entry_point or 'normalizer' in name:
+                    plugin_type = 'Normalizer'
+                elif 'app' in entry_point or 'app' in name:
+                    plugin_type = 'App'
+                elif 'example' in entry_point or 'example' in name:
+                    plugin_type = 'Example upload'
+                elif 'api' in entry_point or 'api' in name:
+                    plugin_type = 'API'
+                result.append(
+                    NomadPlugin(name=name, module=entry_point, type=plugin_type)
+                )
+            values['nomad_plugin'] = result
+        return values
+
+
+class PyProjectTOML(BaseModel):
+    name: str
+    dynamic: list[str] | None = None
+    authors: list[Author] | None = None
+    maintainers: list[Author] | None = None
+    description: str | None = None
+    readme: str | None = None
+    license: LicenseInfo | None = None
+    requires_python: str | None = None
+    dependencies: list[str] | None = None
+    urls: URLs | None = None
+    optional_dependencies: dict[str, list[str]] | None = None
+    all_dependencies: set[str] | None = (
+        None  # this is a custom field that combines all of the deps (main and optional)
+    )
+    entry_points: EntryPoints | None = Field(None, alias='entry-points')
+
+    @model_validator(mode='before')
+    @classmethod
+    def deps(cls, values):
+        all_dependencies = [
+            extract_dependency_name(dep) for dep in values.get('dependencies', [])
+        ]
+        for _, deps in values.get('optional-dependencies', {}).items():
+            all_dependencies.extend([extract_dependency_name(dep) for dep in deps])
+
+        values['all_dependencies'] = all_dependencies
+        return values
+
+
+class PluginReference(BaseModel):
+    m_def: str = 'nomad_plugins.schema_packages.plugin.PluginReference'
+    name: str
+    location: str
+
+
+class Plugin(BaseModel):
+    m_def: str = 'nomad_plugins.schema_packages.plugin.Plugin'
+    repository: HttpUrl
+    stars: int
+    created: str
+    last_updated: str
+    owner: str
+    name: str
+    description: str | None = None
+    all_dependencies: set[str] = Field(
+        set(), description='Placeholder field to store all dependencies', exclude=True
+    )
+    plugin_dependencies: list[PluginReference] = []
+    authors: list[Author] = []
+    maintainers: list[Author] = []
+    on_central: bool
+    on_example_oasis: bool
+    on_pypi: bool
+    plugin_entry_points: list[NomadPlugin] | None = None
+
+
+class PluginData(BaseModel):
+    data: Plugin
 
 
 class OasisURLs(Enum):
     CENTRAL = (
-        'https://gitlab.mpcdf.mpg.de/nomad-lab/nomad-distro/-/raw/'
-        'main/pyproject.toml'
+        'https://gitlab.mpcdf.mpg.de/nomad-lab/nomad-distro/-/raw/main/requirements.txt'
     )
-    EXAMPLE = (
-        'https://gitlab.mpcdf.mpg.de/nomad-lab/nomad-distro/-/raw/'
-        'test-oasis/pyproject.toml'
-    )
+
+    EXAMPLE = 'https://gitlab.mpcdf.mpg.de/nomad-lab/nomad-distro/-/raw/test-oasis/requirements.txt'
 
 
 # GitHub Code Search API URL
@@ -30,103 +346,39 @@ GITHUB_CODE_API = 'https://api.github.com/search/code'
 GITHUB_REPO_API = 'https://api.github.com/repos'
 
 
-def fetch_file_created(repo_name: str, file_path: str, headers: dict) -> str:
+# The following two repositories are not actual plugins
+EXCLUDED_REPOS = set({'nomad-coe/nomad', 'FAIRmat-NFDI/cookiecutter-nomad-plugin'})
+
+
+async def fetch_nomad_deployment_requirements(
+    requirements_url: str,
+) -> set[str]:
     """
-    Fetches the creation date of a file in a GitHub repository by retrieving the
-    commit history of the file and returning the date of the earliest commit.
+    Fetches and parses a `requirements.txt` file from a given URL.
     Args:
-        repo_name (str): The name of the GitHub repository in the format 'owner/repo'.
-        file_path (str): The path to the file within the repository.
-        headers (dict): The headers to include in the request, typically containing
-                        the authorization token.
+        requirements_url (str): The URL of the `requirements.txt` file.
     Returns:
-        str: The creation date of the file in ISO 8601 format (YYYY-MM-DDTHH:MM:SSZ),
-             or None if the commits could not be fetched.
+        set: set of dependencies
     """
-
-    commits_url = f'{GITHUB_REPO_API}/{repo_name}/commits?path={file_path}'
-    commits = []
-    commits_page = 1
-
-    while True:
-        commits_params = {
-            'path': file_path,
-            'per_page': 30,
-            'page': commits_page,
-        }
-        commits_response = requests.get(
-            commits_url, headers=headers, params=commits_params
+    response = await fetch_page_async(requirements_url)
+    if response:
+        return set(
+            [
+                # the first two lines are preamble by uv
+                extract_dependency_name(line)
+                for line in response.text.splitlines()[2:]
+            ]
         )
-        if commits_response.ok:
-            commits_page_results = commits_response.json()
-            commits.extend(commits_page_results)
-            if 'next' in commits_response.links:
-                commits_page += 1
-            else:
-                break
-        else:
-            click.echo(
-                f'Failed to fetch commits for {repo_name}: '
-                f'{commits_response.status_code}, {commits_response.text}'
-            )
-            return None
-    if commits:
-        file_created = commits[-1]['commit']['committer']['date']
-        return file_created
-    return None
+    return set()
 
 
-def fetch_nomad_deployment_toml(toml_url: str) -> dict:
-    """
-    Fetches and parses a `pyproject.toml` file from a given URL.
-    Args:
-        toml_url (str): The URL of the `pyproject.toml` file.
-    Returns:
-        dict: A dictionary containing the parsed `pyproject.toml` file if successful,
-              otherwise an empty dictionary.
-    """
-    response = requests.get(toml_url)
-    if not response.ok:
-        msg = f'Failed to get pyproject.toml from {toml_url}: {response.text}'
-        click.echo(msg)
-    try:
-        return toml.loads(response.text)
-    except toml.TomlDecodeError as e:
-        click.echo(f'Failed to parse pyproject.toml from {toml_url}: {e}')
-        return {}
-
-
-def fetch_repo_details(repo_full_name: str, headers: dict) -> dict:
-    """
-    Fetches the details of a GitHub repository using the GitHub API.
-    Args:
-        repo_full_name (str): The full name of the repository (e.g., 'owner/repo').
-        headers (dict): The headers to include in the request, typically containing
-                        the authorization token.
-    Returns:
-        dict: A dictionary containing the repository details if the request is
-              successful.
-              Returns None if the request fails, and prints an error message with the
-              status code and response text.
-    """
-
-    repo_url = f'{GITHUB_REPO_API}/{repo_full_name}'
-    response = requests.get(repo_url, headers=headers)
-    if response.ok:
-        return response.json()
-    else:
-        click.echo(
-            f'Failed to fetch repository details for {repo_full_name}: '
-            f'{response.status_code}, {response.text}'
-        )
-        return None
-
-
-def get_toml_project(url: str, subdirectory: str, headers: dict) -> dict:
+async def get_toml_project(
+    search_result: GitHubSearchResultItem,
+) -> PyProjectTOML | None:
     """
     Fetches and parses the `pyproject.toml` file from a given GitHub repository.
     Args:
-        url (str): The URL of the GitHub repository.
+        search_result (GitHubSearchResultItem): The URL of the GitHub repository.
         subdirectory (str): The subdirectory within the repository where the
                             `pyproject.toml` file is located.
         headers (dict): The headers to include in the request, typically containing
@@ -135,206 +387,177 @@ def get_toml_project(url: str, subdirectory: str, headers: dict) -> dict:
         dict: A dictionary containing the 'project' section of the `pyproject.toml` file
               if successful, otherwise an empty dictionary.
     """
+    repo_html_url = str(search_result.repository.html_url)
+    commit_sha = str(search_result.url).split('ref=')[-1]
 
-    repo_api_url = url.replace('https://github.com', GITHUB_REPO_API)
-    request_url = f'{repo_api_url}/contents/{subdirectory}pyproject.toml'
-    response = requests.get(request_url, headers=headers)
-    if response.ok:
-        content = response.json().get('content')
-        if content:
-            toml_content = base64.b64decode(content).decode('utf-8')
-            try:
-                return toml.loads(toml_content).get('project', {})
-            except toml.TomlDecodeError as e:
-                click.echo(f'Failed to parse pyproject.toml from {request_url}: {e}')
-    elif response.status_code == requests.codes.forbidden:
-        msg = 'Too many requests to GitHub API. Please try again later.'
-        click.echo(msg)
-    else:
-        msg = (
-            f'Failed to get pyproject.toml from {request_url}: '
-            f'{response.json().get("message", "No message")}'
-        )
-        click.echo(msg)
-    return {}
+    if 'pyproject.toml' not in search_result.path or not commit_sha:
+        return None
+
+    # Ensure repo_html_url ends without trailing slash, we will use join to add paths.
+    repo_html_url = repo_html_url.rstrip('/')
+
+    raw_url = f'https://raw.githubusercontent.com/{search_result.repository.full_name}/{commit_sha}/{search_result.path}'
+
+    response = await fetch_page_async(url=raw_url)
+    if response:
+        try:
+            toml_content = toml.loads(response.text).get('project', {})
+            return PyProjectTOML.model_validate(toml_content)
+        except toml.TomlDecodeError as e:
+            click.echo(f'Failed to parse pyproject.toml from {raw_url}: {e}')
+    return None
 
 
-def in_distribution_toml(plugin_name: str, pyproject_data: dict) -> bool:
+async def package_exists_on_pypi(package_name: str) -> bool:
     """
-    Checks if a given plugin name is listed in the plugin dependencies of a
-    pyproject.toml file.
+    Checks if a package exists on PyPI using a HEAD request.
+
     Args:
-        plugin_name (str): The name of the plugin to check for.
-        toml_data (dict): An dictionary containing the pyproject toml data.
+        package_name: The name of the package to check.
+
     Returns:
-        bool: True if the plugin name is found in the optional dependencies, False
-              otherwise.
+        True if the package exists (HTTP status code 200), False otherwise
+        (including network errors).
     """
-    name_pattern = re.compile(r'^[^;>=<\s]+')
-    plugin_dependencies = pyproject_data['project']['optional-dependencies']['plugins']
-    return plugin_name in [name_pattern.match(d).group() for d in plugin_dependencies]
+    async with httpx.AsyncClient() as client:
+        try:
+            url = f'https://pypi.org/pypi/{package_name}/json'
+            response = await client.head(url)
+            return response.status_code == 200  # noqa: PLR2004
+        except httpx.RequestError:
+            return False
 
 
-def find_dependencies(project: dict, headers: dict) -> list[dict]:
-    """
-    Finds and returns a list of plugin dependencies for a given project.
-    This function examines the dependencies of a given project and identifies
-    those that are related to 'nomad-lab'. It supports both standard PyPI
-    dependencies and dependencies specified via git URLs.
-    Args:
-        project (dict): A dictionary representing the project, which should
-                        contain a 'dependencies' key with a list of dependency
-                        strings.
-        headers (dict): A dictionary of HTTP headers to use when making requests
-                        to external services.
-    Returns:
-        list[dict]: A list of dictionaries, each representing a plugin dependency.
-                    Each dictionary contains the following keys:
-                    - 'm_def': A string indicating the schema definition.
-                    - 'name': The name of the dependency.
-                    - 'location': The URL or location of the dependency.
-                    - 'toml_directory': The subdirectory within the git repository
-                                        where the dependency's pyproject.toml file
-                                        is located (if applicable).
-    """
-
-    name_pattern = re.compile(r'^[^;>=<\s]+')
-    git_pattern = re.compile(r'@ git\+(.*?)\.git(?:@[^#]+)?(?:#subdirectory=(.*))?')
-    plugin_dependencies = []
-    for dependency in project.get('dependencies', []):
-        name = name_pattern.match(dependency).group(0)
-        git_match = git_pattern.search(dependency)
-        toml_directory = ''
-        if git_match:
-            location = git_match.group(1)
-            if git_match.group(2):
-                toml_directory = git_match.group(2) + '/'
-            project = get_toml_project(location, toml_directory, headers)
-            if not any('nomad-lab' in d for d in project.get('dependencies', [])):
-                continue
-        else:
-            response = requests.get(f'https://pypi.org/pypi/{name}/json')
-            if not response.ok:
-                continue
-            response_json = response.json()
-            info = response_json.get('info', {})
-            dependencies = info.get('requires_dist', [])
-            if not dependencies or not any('nomad-lab' in d for d in dependencies):
-                continue
-            location = f'https://pypi.org/project/{name}/'
-
-        plugin_dependencies.append(
-            dict(
-                m_def='nomad_plugins.schema_packages.plugin.PluginReference',
-                name=name,
-                location=location,
-                toml_directory=toml_directory,
-            )
-        )
-    return plugin_dependencies
-
-
-def get_entry_points(toml_project: dict) -> dict:
-    """
-    Extracts and categorizes plugin entry points from a given TOML project dictionary.
-    Args:
-        toml_project (dict): A dictionary representation of the project from a
-        pyproject.toml file.
-    Returns:
-        dict: A list of dictionaries, each representing a plugin entry point with the
-            following keys:
-            - m_def (str): The module definition for the plugin entry point.
-            - name (str): The name of the entry point.
-            - module (str): The module path of the entry point.
-            - type (str or None): The type of the entry point, which can be one of the
-              following:
-                'Schema package', 'Parser', 'Normalizer', 'App', 'Example upload',
-                'API', or None if no type is matched.
-    """
-
-    entry_points = toml_project.get('entry-points', {}).get('nomad.plugin', {})
-    plugin_entry_points = []
-    for name, entry_point in entry_points.items():
-        type = None
-        if 'schema' in entry_point or 'schema' in name:
-            type = 'Schema package'
-        elif 'parser' in entry_point or 'parser' in name:
-            type = 'Parser'
-        elif 'normalizer' in entry_point or 'normalizer' in name:
-            type = 'Normalizer'
-        elif 'app' in entry_point or 'app' in name:
-            type = 'App'
-        elif 'example' in entry_point or 'example' in name:
-            type = 'Example upload'
-        elif 'api' in entry_point or 'api' in name:
-            type = 'API'
-        plugin_entry_points.append(
-            dict(
-                m_def='nomad_plugins.schema_packages.plugin.PluginEntryPoint',
-                name=name,
-                module=entry_point,
-                type=type,
-            )
-        )
-    return plugin_entry_points
-
-
-def get_plugin(
-    *, item: dict, headers: dict, central_toml: dict, example_oasis_toml: dict) -> dict:
+async def get_plugin(
+    *,
+    item: GitHubSearchResultItem,
+    headers: dict,
+    central_plugins: set[str],
+    example_oasis_plugins: set[str],
+) -> Plugin | None:
     """
     Extracts plugin information from a given repository item and returns it as a
     dictionary.
     Args:
-        item (dict): A dictionary containing repository item information, including the
-                     repository details and file path.
+        item (GitHubSearchResultItem): Item returned by Github Search
         headers (dict): A dictionary containing HTTP headers for making requests to
                         external services.
-        central_toml (dict): Central distribution pyproject toml data.
-        example_oasis_toml (dict): Example oasis pyproject toml data.
-    Returns:
-        dict: A dictionary containing the extracted plugin information, including
-              repository details, project metadata, and plugin-specific attributes.
-              Returns None if required information is missing or cannot be fetched.
+        central_plugins (set[str]): All plugins in central installation
+        example_oasis_plugins (set[str]): All plugins in example oasis installation
     """
 
-    repo_info = item['repository']
-    repo_full_name = repo_info['full_name']
-    repo_details = fetch_repo_details(repo_full_name, headers)
-    if repo_details is None:
-        return
-    toml_directory = ''
-    if not item['path'].startswith('pyproject.toml'):
-        toml_directory = item['path'].split('/pyproject.toml')[0] + '/'
-    project = get_toml_project(repo_info['url'], toml_directory, headers)
-    name = project.get('name', None)
-    if name is None:
-        return
-    plugin = dict(
-        m_def='nomad_plugins.schema_packages.plugin.Plugin',
-        repository='https://github.com/' + repo_full_name,
-        stars=repo_details['stargazers_count'],
-        created=fetch_file_created(
-            repo_full_name,
-            item['path'],
-            headers,
-        ),
-        last_updated=repo_details['pushed_at'],
-        owner=repo_info['owner']['login'],
-        name=name,
-        description=project.get('description', None),
-        authors=project.get('authors', []),
-        maintainers=project.get('maintainers', []),
-        plugin_dependencies=find_dependencies(project, headers),
-        on_central=in_distribution_toml(name, central_toml),
-        on_example_oasis=in_distribution_toml(name, example_oasis_toml),
-        on_pypi=requests.get(f'https://pypi.org/pypi/{name}/json').ok,
-        plugin_entry_points=get_entry_points(project),
+    repo_info = item.repository
+    repo_contents_task = fetch_page_async(url=str(repo_info.url), headers=headers)
+    project_task = get_toml_project(item)
+    repo_contents, project = await asyncio.gather(*[repo_contents_task, project_task])
+    if not repo_contents or not project:
+        return None
+    repo_details = GitHubRepositoryDetailed.model_validate(repo_contents.json())
+    name = project.name
+    on_pypi = await package_exists_on_pypi(name)
+    on_central = name in central_plugins
+    on_example_oasis = name in example_oasis_plugins
+    plugin_entry_points = (
+        project.entry_points.nomad_plugin if project.entry_points else []
     )
-    plugin['toml_directory'] = toml_directory[:-1]
+    authors = project.authors or []
+    maintainers = project.maintainers or []
+    all_dependencies = project.all_dependencies or set()
+    plugin = Plugin(
+        repository=repo_info.html_url,
+        stars=repo_details.stargazers_count,
+        created=repo_details.created_at,
+        last_updated=repo_details.updated_at,
+        owner=repo_info.owner.login,
+        name=name,
+        all_dependencies=all_dependencies,
+        description=project.description,
+        authors=authors,
+        maintainers=maintainers,
+        on_central=on_central,
+        on_example_oasis=on_example_oasis,
+        on_pypi=on_pypi,
+        plugin_entry_points=plugin_entry_points,
+    )
     return plugin
 
 
-def find_plugins(token: str, central_toml: dict, example_oasis_toml: dict) -> dict:
+async def fetch_page_async(
+    url: str, *, headers: dict | None = None, params: dict | None = None
+) -> httpx.Response | None:
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(url, headers=headers, params=params)
+            response.raise_for_status()
+            return response
+        except httpx.HTTPStatusError as e:
+            # print(f'HTTP error: {e}')
+            return None
+        except httpx.RequestError as e:
+            # print(f'Request error: {e}')
+            return None
+        except Exception as e:
+            # print(f'Unexpected error: {e}')
+            return None
+
+
+async def fetch_all_results_parallel_async(
+    *, url: str, headers: dict, params: dict
+) -> list[GitHubSearchResultItem]:
+    """
+    Asynchronously fetches all pages of results from a paginated API in parallel.
+
+    Args:
+        url: The base URL of the API endpoint.
+        headers: The headers to include in the request.
+        params: The initial query parameters.
+
+    Returns:
+        A list of `GitHubSearchResultItem`, where each item represents the JSON response
+        from a single page.
+    """
+    try:
+        initial_response = await fetch_page_async(
+            url=url, headers=headers, params=params
+        )
+        items = []
+        if initial_response is None:
+            return []
+        initial_response = initial_response.json()
+
+        items.extend(initial_response.get('items', []))
+        total_count = initial_response['total_count']
+        per_page = params.get('per_page', 30)
+        num_pages = math.ceil(total_count / per_page)
+
+        tasks = [
+            fetch_page_async(url=url, headers=headers, params={**params, 'page': page})
+            # start with second page since the initial_response contains
+            # results for the first page
+            for page in range(2, num_pages + 1)
+        ]
+
+        with click.progressbar(
+            length=len(tasks), label='Fetching Github Search data'
+        ) as bar:
+            for future in asyncio.as_completed(tasks):
+                res = await future
+                if res:
+                    items.extend(res.json().get('items', []))
+                bar.update(1)
+
+        search_result_item_adapter = TypeAdapter(list[GitHubSearchResultItem])
+        validated_data = search_result_item_adapter.validate_python(items)
+        return validated_data
+
+    except Exception as e:
+        print(f'Unexpected error: {e}')
+        return []
+
+
+async def find_plugins(
+    token: str,
+) -> list[PluginData]:
     """
     Find and retrieve Nomad plugins from GitHub repositories.
     This function searches for repositories containing Nomad plugins by querying
@@ -342,12 +565,11 @@ def find_plugins(token: str, central_toml: dict, example_oasis_toml: dict) -> di
     have 'nomad.plugin' entry points defined in their `pyproject.toml` files.
     Args:
         token (str): GitHub personal access token for authentication.
-        central_toml (dict): Central distribution pyproject toml data.
-        example_oasis_toml (dict): Example oasis pyproject toml data.
-    Returns:
-        dict: A dictionary where keys are plugin names (repository full names with
-              slashes replaced by underscores) and values are the plugin data.
     """
+    example_oasis_plugins = await fetch_nomad_deployment_requirements(
+        OasisURLs.EXAMPLE.value
+    )
+    central_plugins = await fetch_nomad_deployment_requirements(OasisURLs.CENTRAL.value)
 
     query = 'nomad.plugin in:file filename:pyproject.toml'
     params = {
@@ -357,50 +579,53 @@ def find_plugins(token: str, central_toml: dict, example_oasis_toml: dict) -> di
         'per_page': 30,
     }
     headers = {'Authorization': f'token {token}'}
+    search_items = await fetch_all_results_parallel_async(
+        url=GITHUB_CODE_API, headers=headers, params=params
+    )
 
-    plugins = {}
-    page = 1
+    tasks = [
+        get_plugin(
+            item=item,
+            headers=headers,
+            central_plugins=central_plugins,
+            example_oasis_plugins=example_oasis_plugins,
+        )
+        for item in search_items
+        if item.repository.full_name not in EXCLUDED_REPOS
+    ]
 
-    # Initial request to get the total number of items
-    response = requests.get(GITHUB_CODE_API, headers=headers, params=params)
-    if not response.ok:
-        click.echo(f'Failed to fetch data: {response.status_code}, {response.text}')
-        return plugins
+    plugins: dict[str, Plugin] = {}
+    with click.progressbar(
+        length=len(tasks), label='Fetching individual plugin data'
+    ) as bar:
+        for future in asyncio.as_completed(tasks):
+            plugin = await future
+            if plugin:
+                plugins[plugin.name] = plugin
+            bar.update(1)
 
-    search_results = response.json()
-    total_items = search_results['total_count']
-    click.echo(f'Found {total_items} repositories')
+    data: list[PluginData] = []
 
-    with click.progressbar(length=total_items, label='Processing repositories') as bar:
-        while True:
-            params['page'] = page
-
-            response = requests.get(GITHUB_CODE_API, headers=headers, params=params)
-
-            if not response.ok:
-                click.echo(
-                    f'Failed to fetch data: {response.status_code}, {response.text}'
+    # Add nomad related dependencies to the plugin dependency list
+    for plugin in plugins.values():
+        nomad_related_deps = []
+        for dep in plugin.all_dependencies:
+            if plugin_dep := plugins.get(dep):
+                location = str(
+                    f'https://pypi.org/project/{dep}/'
+                    if plugin_dep.on_pypi
+                    else plugin_dep.repository
                 )
-                break
-            search_results = response.json()
-            total_items = search_results['total_count']
-            for item in search_results['items']:
-                plugin_name = item['repository']['full_name'].replace('/', '_')
-                plugins[plugin_name] = get_plugin(
-                    item=item,
-                    headers=headers,
-                    central_toml=central_toml,
-                    example_oasis_toml=example_oasis_toml,
-                )
-                bar.update(1)
-            if 'next' in response.links:
-                page += 1
-            else:
-                break
-    return plugins
+                nomad_related_deps.append(PluginReference(name=dep, location=location))
+        plugin.plugin_dependencies = nomad_related_deps
+        data.append(PluginData(data=plugin))
+
+    return data
 
 
-def get_authentication_token(nomad_url: str, username: str, password: str) -> str:
+def get_authentication_token(
+    *, nomad_url: str, username: str, password: str
+) -> str | None:
     """
     Retrieves an authentication token from the specified Nomad URL using the provided
     username and password.
@@ -411,10 +636,9 @@ def get_authentication_token(nomad_url: str, username: str, password: str) -> st
     Returns:
         str: The authentication token if successfully retrieved, otherwise None.
     """
-
     try:
         response = requests.get(
-            nomad_url + 'auth/token',
+            f'{nomad_url}/auth/token',
             params=dict(username=username, password=password),
             timeout=10,
         )
@@ -429,39 +653,43 @@ def get_authentication_token(nomad_url: str, username: str, password: str) -> st
         return
 
 
+@dataclass
+class NomadUploadInfo:
+    nomad_url: str
+    token: str
+    upload_id: str | None = None
+
+
 def upload_to_NOMAD(
-        nomad_url: str, token: str, plugins: dict, upload_id: str=None) -> str:
+    nomad_upload_info: NomadUploadInfo,
+    plugins: list[PluginData],
+) -> str | None:
     """
     Uploads a file to the NOMAD server.
     Args:
-        nomad_url (str): The URL of the NOMAD api, 
-                         e.g. http://nomad-lab.eu/prod/v1/api/v1/.
-        token (str): The authorization token for accessing the NOMAD server.
+        nomad_upload_info: A dataclass containing the NOMAD URL, token, and upload ID.
         plugins (dict): A dictionary where keys are plugin names and values are plugin
                         data
-        upload_id (str): The ID of the upload if pushing to and existing upload.
     Returns:
         str: The upload ID if the upload is successful, otherwise None.
     """
     with tempfile.TemporaryDirectory(dir=config.fs.tmp) as temp_dir:
-        files = []
-        for name, plugin in plugins.items():
-            files.append(os.path.join(temp_dir, f'{name}.archive.json'))
-            with open(files[-1], 'w') as f:
-                json.dump({'data': plugin}, f, indent=4)
-
         zip_file = os.path.join(temp_dir, 'plugins.zip')
         with ZipFile(zip_file, 'w', ZIP_DEFLATED, allowZip64=True) as zf:
-            for file in files:
-                zf.write(file, os.path.basename(file))
+            for plugin in plugins:
+                zip_entry_name = f'{plugin.data.name}.archive.json'
+                zf.writestr(
+                    zip_entry_name,
+                    plugin.model_dump_json(exclude_none=True).encode('utf-8'),
+                )
 
         with open(zip_file, 'rb') as f:
             try:
-                if not upload_id:
+                if not nomad_upload_info.upload_id:
                     response = requests.post(
-                        nomad_url + 'uploads/',
+                        f'{nomad_upload_info.nomad_url}/uploads/',
                         headers={
-                            'Authorization': f'Bearer {token}',
+                            'Authorization': f'Bearer {nomad_upload_info.token}',
                             'Accept': 'application/json',
                         },
                         data=f,
@@ -469,9 +697,9 @@ def upload_to_NOMAD(
                     )
                 else:
                     response = requests.put(
-                        nomad_url + f'uploads/{upload_id}/raw/',
+                        f'{nomad_upload_info.nomad_url}/uploads/{nomad_upload_info.upload_id}/raw/',
                         headers={
-                            'Authorization': f'Bearer {token}',
+                            'Authorization': f'Bearer {nomad_upload_info.token}',
                             'Accept': 'application/json',
                         },
                         data=f,
@@ -490,25 +718,21 @@ def upload_to_NOMAD(
 
 
 def wait_for_processing(
-        nomad_url: str, 
-        upload_id: str, 
-        token: str, 
-        timeout: int=1800, 
-        interval: int=10,
-    ) -> bool:
+    nomad_upload_info: NomadUploadInfo,
+    timeout: int = 1800,
+    interval: int = 10,
+) -> bool:
     """
     Waits for the processing of the upload to be completed.
     Args:
-        nomad_url (str): URL of the NOMAD service.
-        upload_id (str): ID of the upload.
-        token (str): Authentication token.
+        nomad_upload_info: A dataclass containing the NOMAD URL, token, and upload ID.
         timeout (int): Timeout in seconds.
         interval (int): Polling interval in seconds.
     Returns:
         bool: True if processing is complete, False if timeout is reached.
     """
-    headers = {'Authorization': f'Bearer {token}'}
-    url = f'{nomad_url}uploads/{upload_id}'
+    headers = {'Authorization': f'Bearer {nomad_upload_info.token}'}
+    url = f'{nomad_upload_info.nomad_url}/uploads/{nomad_upload_info.upload_id}'
     start_time = time.time()
 
     while time.time() - start_time < timeout:
@@ -523,11 +747,12 @@ def wait_for_processing(
 
 
 def get_upload_args(
-        nomad_url: str, 
-        nomad_username: str, 
-        nomad_password: str, 
-        upload_id: str,
-    ) -> tuple:
+    *,
+    nomad_url: str,
+    nomad_username: str,
+    nomad_password: str,
+    upload_id: str,
+) -> NomadUploadInfo:
     """
     Get the NOMAD upload arguments from the command line or config file.
     Args:
@@ -536,7 +761,7 @@ def get_upload_args(
         nomad_password (str): The NOMAD password.
         upload_id (str): The upload ID.
     Returns:
-        tuple: A tuple containing the NOMAD URL, token, and upload ID.
+        NomadUploadInfo: A dataclass containing the NOMAD URL, token, and upload ID.
     """
     if upload_id is None:
         config.load_plugins()
@@ -551,14 +776,18 @@ def get_upload_args(
         if config.client.url is None:
             click.echo('NOMAD url is not provided or set in nomad.yaml, exiting.')
             sys.exit(1)
-        nomad_url = f'{config.client.url}/v1/'
-    if not nomad_url.endswith('/'):
-        nomad_url += '/'
-    nomad_token = get_authentication_token(nomad_url, nomad_username, nomad_password)
+        nomad_url = f'{config.client.url}/v1'
+    # Ensure nomad_url ends without trailing slash, we will use join to add paths.
+    nomad_url = nomad_url.rstrip('/')
+    nomad_token = get_authentication_token(
+        nomad_url=nomad_url,
+        username=nomad_username,
+        password=nomad_password,
+    )
     if not nomad_token:
-        click.echo('Failed to fetch nomad authentication token') 
+        click.echo('Failed to fetch nomad authentication token')
         sys.exit(1)
-    return nomad_url, nomad_token, upload_id
+    return NomadUploadInfo(nomad_url=nomad_url, token=nomad_token, upload_id=upload_id)
 
 
 @click.command()
@@ -566,27 +795,32 @@ def get_upload_args(
     '--github-token',
     prompt='GitHub personal access token',
     help='Your GitHub personal access token to use when querying for plugins.',
+    envvar='GITHUB_TOKEN',
     hide_input=True,
 )
 @click.option(
     '--nomad-username',
+    envvar='NOMAD_USERNAME',
     prompt='NOMAD username',
-    help='NOMAD username for the owner of the plugins upload.'
+    help='NOMAD username for the owner of the plugins upload.',
 )
 @click.option(
     '--nomad-password',
     prompt='NOMAD password',
+    envvar='NOMAD_PASSWORD',
     help='NOMAD password for the owner of the plugins upload.',
     hide_input=True,
 )
 @click.option(
     '--nomad-url',
+    envvar='NOMAD_URL',
     default=None,
     help='The NOMAD API URL, defaults to client.url in nomad.yaml.',
 )
 @click.option(
     '--upload-id',
     default=None,
+    envvar='UPLOAD_ID',
     help='Optional upload ID for updating an existing upload.',
 )
 def main(github_token, nomad_url, nomad_username, nomad_password, upload_id):
@@ -600,7 +834,7 @@ def main(github_token, nomad_url, nomad_username, nomad_password, upload_id):
         url: <nomad-url>
 
     The upload-id can be provided as an argument or in the nomad.yaml config file as:
-    
+
     plugins:
 
         entry_points:
@@ -608,35 +842,47 @@ def main(github_token, nomad_url, nomad_username, nomad_password, upload_id):
             options:
 
                 nomad_plugins.apps:plugin_app_entry_point:
-                
+
                     upload_id: <upload-id>
 
     """
-    nomad_url, nomad_token, upload_id = get_upload_args(
-        nomad_url, nomad_username, nomad_password, upload_id
+    nomad_upload_info = get_upload_args(
+        nomad_url=nomad_url,
+        nomad_username=nomad_username,
+        nomad_password=nomad_password,
+        upload_id=upload_id,
     )
-    
-    example_oasis_toml = fetch_nomad_deployment_toml(OasisURLs.EXAMPLE.value)
-    central_toml = fetch_nomad_deployment_toml(OasisURLs.CENTRAL.value)
-
-    plugins = find_plugins(
-        github_token,
-        central_toml=central_toml,
-        example_oasis_toml=example_oasis_toml,
+    plugins = asyncio.run(
+        find_plugins(
+            github_token,
+        )
     )
-    
-    upload_id = upload_to_NOMAD(nomad_url, nomad_token, plugins, upload_id)
-    click.echo(f'Uploaded to NOMAD upload: {upload_id}')
-    click.echo(f'Waiting for processing of upload {upload_id} to complete...')
-    if wait_for_processing(nomad_url, upload_id, nomad_token, timeout=1800):
-        click.echo(f'First processing of upload {upload_id} is complete.')
-        headers = {'Authorization': f'Bearer {nomad_token}'}
-        url = f'{nomad_url}uploads/{upload_id}/action/process'
+    upload_id = upload_to_NOMAD(
+        nomad_upload_info=nomad_upload_info,
+        plugins=plugins,
+    )
+    nomad_upload_info.upload_id = upload_id
+    click.echo(f'Uploaded to NOMAD upload: {nomad_upload_info.upload_id}')
+    click.echo(
+        f'Waiting for processing of upload {nomad_upload_info.upload_id} to complete...'
+    )
+    if wait_for_processing(nomad_upload_info, timeout=1800):
+        click.echo(
+            f'First processing of upload {nomad_upload_info.upload_id} is complete.'
+        )
+        headers = {'Authorization': f'Bearer {nomad_upload_info.token}'}
+        url = f'{nomad_upload_info.nomad_url}/uploads/{nomad_upload_info.upload_id}/action/process'  # noqa
         response = requests.post(url, headers=headers)
         if response.ok:
-            click.echo(f'Second processing of upload {upload_id} has been triggered.')
+            click.echo(
+                f'Second processing of upload {nomad_upload_info.upload_id} '
+                'has been triggered.'
+            )
     else:
-        click.echo(f'Timeout reached while waiting for upload {upload_id} to process.')
+        click.echo(
+            'Timeout reached while waiting for upload '
+            f'{nomad_upload_info.upload_id} to process.'
+        )
 
 
 if __name__ == '__main__':

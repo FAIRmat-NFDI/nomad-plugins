@@ -31,6 +31,8 @@ dependencies = [
     "toml",
     "click",
     "requests",
+    "httpx>=0.27.2",
+    "pydantic>=2",
 ]
 
 [project.urls]

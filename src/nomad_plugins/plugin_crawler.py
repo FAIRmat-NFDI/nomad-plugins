@@ -637,9 +637,9 @@ def get_authentication_token(
         str: The authentication token if successfully retrieved, otherwise None.
     """
     try:
-        response = requests.get(
+        response = requests.post(
             f'{nomad_url}/auth/token',
-            params=dict(username=username, password=password),
+            data=dict(username=username, password=password),
             timeout=10,
         )
         token = response.json().get('access_token')

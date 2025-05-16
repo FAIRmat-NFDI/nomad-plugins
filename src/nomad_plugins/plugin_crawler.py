@@ -378,7 +378,7 @@ async def get_toml_project(
     """
     Fetches and parses the `pyproject.toml` file from a given GitHub repository.
     Args:
-        search_result (GitHubSearchResultItem): The URL of the GitHub repository.
+        search_result (GitHubSearchResultItem): The search result from the GitHub code search.
         subdirectory (str): The subdirectory within the repository where the
                             `pyproject.toml` file is located.
         headers (dict): The headers to include in the request, typically containing

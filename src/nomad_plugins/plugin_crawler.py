@@ -378,7 +378,8 @@ async def get_toml_project(
     """
     Fetches and parses the `pyproject.toml` file from a given GitHub repository.
     Args:
-        search_result (GitHubSearchResultItem): The search result from the GitHub code search.
+        search_result (GitHubSearchResultItem): The search result from the GitHub code
+                                                search.
         subdirectory (str): The subdirectory within the repository where the
                             `pyproject.toml` file is located.
         headers (dict): The headers to include in the request, typically containing
@@ -490,13 +491,13 @@ async def fetch_page_async(
             response = await client.get(url, headers=headers, params=params)
             response.raise_for_status()
             return response
-        except httpx.HTTPStatusError as e:
+        except httpx.HTTPStatusError:
             # print(f'HTTP error: {e}')
             return None
-        except httpx.RequestError as e:
+        except httpx.RequestError:
             # print(f'Request error: {e}')
             return None
-        except Exception as e:
+        except Exception:
             # print(f'Unexpected error: {e}')
             return None
 

@@ -7,6 +7,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -14,8 +15,14 @@ import click
 import httpx
 import requests
 import toml
+from dotenv import load_dotenv
 from nomad.config import config
 from pydantic import BaseModel, Field, HttpUrl, TypeAdapter, model_validator
+
+# Load .env file if it exists
+env_path = Path('.env')
+if env_path.exists():
+    load_dotenv(env_path)
 
 
 def extract_dependency_name(dependency_string: str) -> str:
@@ -640,7 +647,7 @@ def get_authentication_token(
     try:
         response = requests.post(
             f'{nomad_url}/auth/token',
-            data=dict(username=username, password=password),
+            data=dict(username=username, password=password, grant_type='password'),
             timeout=10,
         )
         token = response.json().get('access_token')
@@ -674,7 +681,7 @@ def upload_to_NOMAD(
     Returns:
         str: The upload ID if the upload is successful, otherwise None.
     """
-    with tempfile.TemporaryDirectory(dir=config.fs.tmp) as temp_dir:
+    with tempfile.TemporaryDirectory() as temp_dir:
         zip_file = os.path.join(temp_dir, 'plugins.zip')
         with ZipFile(zip_file, 'w', ZIP_DEFLATED, allowZip64=True) as zf:
             for plugin in plugins:

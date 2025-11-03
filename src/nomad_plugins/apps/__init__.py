@@ -13,14 +13,15 @@ from nomad.config.models.ui import (
 
 schema = 'nomad_plugins.schema_packages.plugin.Plugin'
 filters_locked = {
-    'section_defs.definition_qualified_name': [schema], 
+    'section_defs.definition_qualified_name': [schema],
     'entry_type': 'Plugin',
 }
 
 # Workaround: read the upload_ids from plugin's raw config.
 try:
     upload_id = _plugins['entry_points']['options'][
-        'nomad_plugins.schema_packages:schema_package_entry_point']['upload_id']
+        'nomad_plugins.schema_packages:schema_package_entry_point'
+    ]['upload_id']
 except KeyError:
     upload_id = None
 

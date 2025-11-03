@@ -1,0 +1,33 @@
+name: Plugin Crawler
+
+on:
+  schedule:
+    # Run every Monday at 00:00 UTC
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+    # Allow manual triggering of the workflow
+
+jobs:
+  run-plugin-crawler:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv and set the python version
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: 3.12
+
+      - name: Install dependencies
+        run: |
+          uv sync
+
+      - name: Run plugin-crawler
+        env:
+          GITHUB_TOKEN: ${{ secrets.PLUGIN_CRAWLER_GITHUB_TOKEN }}
+          NOMAD_PASSWORD: ${{ secrets.PLUGIN_CRAWLER_NOMAD_PASSWORD }}
+          NOMAD_USERNAME: ${{ vars.PLUGIN_CRAWLER_NOMAD_USERNAME }}
+          NOMAD_URL: ${{ vars.PLUGIN_CRAWLER_NOMAD_URL }}
+          UPLOAD_ID: ${{ vars.PLUGIN_CRAWLER_UPLOAD_ID }}
+        run: |
+          uv run plugin-crawler

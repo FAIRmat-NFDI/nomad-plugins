@@ -7,6 +7,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -14,8 +15,14 @@ import click
 import httpx
 import requests
 import toml
+from dotenv import load_dotenv
 from nomad.config import config
 from pydantic import BaseModel, Field, HttpUrl, TypeAdapter, model_validator
+
+# Load .env file if it exists
+env_path = Path('.env')
+if env_path.exists():
+    load_dotenv(env_path)
 
 
 def extract_dependency_name(dependency_string: str) -> str:
@@ -347,7 +354,11 @@ GITHUB_REPO_API = 'https://api.github.com/repos'
 
 
 # The following two repositories are not actual plugins
-EXCLUDED_REPOS = set({'nomad-coe/nomad', 'FAIRmat-NFDI/cookiecutter-nomad-plugin'})
+EXCLUDED_REPOS = {
+    'nomad-coe/nomad',
+    'FAIRmat-NFDI/cookiecutter-nomad-plugin',
+    'FAIRmat-NFDI/pynxtools-plugin-template',
+}
 
 
 async def fetch_nomad_deployment_requirements(
@@ -378,7 +389,8 @@ async def get_toml_project(
     """
     Fetches and parses the `pyproject.toml` file from a given GitHub repository.
     Args:
-        search_result (GitHubSearchResultItem): The search result from the GitHub code search.
+        search_result (GitHubSearchResultItem): The search result from the GitHub code
+                                                search.
         subdirectory (str): The subdirectory within the repository where the
                             `pyproject.toml` file is located.
         headers (dict): The headers to include in the request, typically containing
@@ -490,13 +502,13 @@ async def fetch_page_async(
             response = await client.get(url, headers=headers, params=params)
             response.raise_for_status()
             return response
-        except httpx.HTTPStatusError as e:
+        except httpx.HTTPStatusError:
             # print(f'HTTP error: {e}')
             return None
-        except httpx.RequestError as e:
+        except httpx.RequestError:
             # print(f'Request error: {e}')
             return None
-        except Exception as e:
+        except Exception:
             # print(f'Unexpected error: {e}')
             return None
 
@@ -639,7 +651,7 @@ def get_authentication_token(
     try:
         response = requests.post(
             f'{nomad_url}/auth/token',
-            data=dict(username=username, password=password),
+            data=dict(username=username, password=password, grant_type='password'),
             timeout=10,
         )
         token = response.json().get('access_token')
@@ -673,7 +685,7 @@ def upload_to_NOMAD(
     Returns:
         str: The upload ID if the upload is successful, otherwise None.
     """
-    with tempfile.TemporaryDirectory(dir=config.fs.tmp) as temp_dir:
+    with tempfile.TemporaryDirectory() as temp_dir:
         zip_file = os.path.join(temp_dir, 'plugins.zip')
         with ZipFile(zip_file, 'w', ZIP_DEFLATED, allowZip64=True) as zf:
             for plugin in plugins:

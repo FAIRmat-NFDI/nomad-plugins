@@ -354,7 +354,11 @@ GITHUB_REPO_API = 'https://api.github.com/repos'
 
 
 # The following two repositories are not actual plugins
-EXCLUDED_REPOS = set({'nomad-coe/nomad', 'FAIRmat-NFDI/cookiecutter-nomad-plugin'})
+EXCLUDED_REPOS = {
+    'nomad-coe/nomad',
+    'FAIRmat-NFDI/cookiecutter-nomad-plugin',
+    'FAIRmat-NFDI/pynxtools-plugin-template',
+}
 
 
 async def fetch_nomad_deployment_requirements(

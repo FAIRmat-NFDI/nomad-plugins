@@ -148,7 +148,7 @@ def test_resolve_deployed_plugin_packages_prefers_info_endpoint(monkeypatch):
     async def fake_fetch_nomad_deployment_plugins_from_info(info_url):
         return {'nomad-parser-plugins-workflow'}
 
-    async def fake_fetch_nomad_deployment_requirements(requirements_url):
+    async def fake_fetch_nomad_deployment_plugins_from_pyproject(pyproject_url):
         return {'nomad-parser-plugins-atomistic'}
 
     monkeypatch.setattr(
@@ -159,14 +159,13 @@ def test_resolve_deployed_plugin_packages_prefers_info_endpoint(monkeypatch):
     monkeypatch.setattr(
         plugin_crawler,
         'fetch_nomad_deployment_plugins_from_pyproject',
-        fake_fetch_nomad_deployment_requirements,
+        fake_fetch_nomad_deployment_plugins_from_pyproject,
     )
 
     resolved = asyncio.run(
         plugin_crawler.resolve_deployed_plugin_packages(
             info_url='https://nomad-lab.eu/prod/v1/api/v1/info',
             pyproject_url='https://gitlab.example/pyproject.toml',
-            legacy_requirements_url='https://gitlab.example/requirements.txt',
         )
     )
     assert resolved == {'nomad-parser-plugins-workflow'}
@@ -194,21 +193,17 @@ def test_resolve_deployed_plugin_packages_falls_back_to_pyproject(monkeypatch):
         plugin_crawler.resolve_deployed_plugin_packages(
             info_url='https://nomad-lab.eu/prod/v1/api/v1/info',
             pyproject_url='https://gitlab.example/pyproject.toml',
-            legacy_requirements_url='https://gitlab.example/requirements.txt',
         )
     )
     assert resolved == {'nomad-parser-plugins-atomistic'}
 
 
-def test_resolve_deployed_plugin_packages_falls_back_to_legacy_requirements(monkeypatch):
+def test_resolve_deployed_plugin_packages_returns_empty_when_both_sources_fail(monkeypatch):
     async def fake_fetch_nomad_deployment_plugins_from_info(info_url):
         return set()
 
     async def fake_fetch_nomad_deployment_plugins_from_pyproject(pyproject_url):
         return set()
-
-    async def fake_fetch_nomad_deployment_requirements(requirements_url):
-        return {'nomad-parser-plugins-workflow'}
 
     monkeypatch.setattr(
         plugin_crawler,
@@ -220,20 +215,14 @@ def test_resolve_deployed_plugin_packages_falls_back_to_legacy_requirements(monk
         'fetch_nomad_deployment_plugins_from_pyproject',
         fake_fetch_nomad_deployment_plugins_from_pyproject,
     )
-    monkeypatch.setattr(
-        plugin_crawler,
-        'fetch_nomad_deployment_requirements',
-        fake_fetch_nomad_deployment_requirements,
-    )
 
     resolved = asyncio.run(
         plugin_crawler.resolve_deployed_plugin_packages(
             info_url='https://nomad-lab.eu/prod/v1/api/v1/info',
             pyproject_url='https://gitlab.example/pyproject.toml',
-            legacy_requirements_url='https://gitlab.example/requirements.txt',
         )
     )
-    assert resolved == {'nomad-parser-plugins-workflow'}
+    assert resolved == set()
 
 
 def test_fetch_nomad_deployment_plugins_from_pyproject(monkeypatch):

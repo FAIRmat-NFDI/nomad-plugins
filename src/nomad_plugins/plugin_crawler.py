@@ -360,14 +360,6 @@ class PluginData(BaseModel):
     data: Plugin
 
 
-class OasisURLs(Enum):
-    CENTRAL = (
-        'https://gitlab.mpcdf.mpg.de/nomad-lab/nomad-distro/-/raw/main/requirements.txt'
-    )
-
-    EXAMPLE = 'https://gitlab.mpcdf.mpg.de/nomad-lab/nomad-distro/-/raw/test-oasis/requirements.txt'
-
-
 class DeploymentInfoURLs(Enum):
     CENTRAL = 'https://nomad-lab.eu/prod/v1/api/v1/info'
     EXAMPLE = 'https://nomad-lab.eu/prod/v1/oasis/api/v1/info'
@@ -389,34 +381,6 @@ EXCLUDED_REPOS = {
     'FAIRmat-NFDI/cookiecutter-nomad-plugin',
     'FAIRmat-NFDI/pynxtools-plugin-template',
 }
-
-
-async def fetch_nomad_deployment_requirements(
-    requirements_url: str,
-) -> set[str]:
-    """
-    Fetches and parses a `requirements.txt` file from a given URL.
-    Args:
-        requirements_url (str): The URL of the `requirements.txt` file.
-    Returns:
-        set: set of dependencies
-    """
-    response = await fetch_page_async(requirements_url)
-    if response:
-        requirements = {
-            normalize_package_name(line) for line in response.text.splitlines()
-        }
-        requirements = {dep for dep in requirements if dep}
-        if DEBUG_DEPLOYMENT_MATCHING:
-            sample = sorted(requirements)[:10]
-            click.echo(
-                f'[debug] Parsed {len(requirements)} dependencies from {requirements_url}'
-            )
-            click.echo(f'[debug] Sample dependencies: {sample}')
-        return requirements
-    if DEBUG_DEPLOYMENT_MATCHING:
-        click.echo(f'[debug] Failed to fetch requirements from {requirements_url}')
-    return set()
 
 
 async def fetch_nomad_deployment_plugins_from_pyproject(pyproject_url: str) -> set[str]:
@@ -495,7 +459,6 @@ async def resolve_deployed_plugin_packages(
     *,
     info_url: str,
     pyproject_url: str,
-    legacy_requirements_url: str | None = None,
 ) -> set[str]:
     """
     Resolve deployed plugin packages using API-first strategy with pyproject fallback.
@@ -507,11 +470,6 @@ async def resolve_deployed_plugin_packages(
     deployed_plugins = await fetch_nomad_deployment_plugins_from_pyproject(pyproject_url)
     if deployed_plugins:
         return deployed_plugins
-
-    if DEBUG_DEPLOYMENT_MATCHING:
-        click.echo('[debug] Falling back to legacy requirements-based matching')
-    if legacy_requirements_url:
-        return await fetch_nomad_deployment_requirements(legacy_requirements_url)
     return set()
 
 
@@ -752,19 +710,17 @@ async def find_plugins(
     example_oasis_plugins = await resolve_deployed_plugin_packages(
         info_url=DeploymentInfoURLs.EXAMPLE.value,
         pyproject_url=DistroPyprojectURLs.EXAMPLE.value,
-        legacy_requirements_url=OasisURLs.EXAMPLE.value,
     )
     central_plugins = await resolve_deployed_plugin_packages(
         info_url=DeploymentInfoURLs.CENTRAL.value,
         pyproject_url=DistroPyprojectURLs.CENTRAL.value,
-        legacy_requirements_url=OasisURLs.CENTRAL.value,
     )
     if DEBUG_DEPLOYMENT_MATCHING:
         click.echo(
-            f'[debug] Central requirements parsed: {len(central_plugins)} entries'
+            f'[debug] Central deployment packages resolved: {len(central_plugins)} entries'
         )
         click.echo(
-            f'[debug] Example oasis requirements parsed: '
+            f'[debug] Example oasis deployment packages resolved: '
             f'{len(example_oasis_plugins)} entries'
         )
 

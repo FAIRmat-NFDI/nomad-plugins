@@ -322,6 +322,7 @@ class Plugin(BaseModel):
     created: str
     last_updated: str
     owner: str
+    owner_type: str | None = None
     name: str
     description: str | None = None
     archived: bool
@@ -476,12 +477,15 @@ async def get_plugin(
     authors = project.authors or []
     maintainers = project.maintainers or []
     all_dependencies = project.all_dependencies or set()
+    owner_type_raw = getattr(repo_info.owner, 'type', None)
+    owner_type = owner_type_raw if owner_type_raw in {'Organization', 'User'} else None
     plugin = Plugin(
         repository=repo_info.html_url,
         stars=repo_details.stargazers_count,
         created=repo_details.created_at,
         last_updated=repo_details.updated_at,
         owner=repo_info.owner.login,
+        owner_type=owner_type,
         name=name,
         all_dependencies=all_dependencies,
         description=project.description,

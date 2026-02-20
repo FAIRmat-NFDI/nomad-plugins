@@ -75,6 +75,9 @@ class Plugin(Schema):
     owner = Quantity(
         type=str,
     )
+    owner_type = Quantity(
+        type=MEnum('Organization', 'User'),
+    )
     on_pypi = Quantity(
         type=bool,
     )

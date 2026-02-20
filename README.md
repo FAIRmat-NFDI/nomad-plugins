@@ -72,6 +72,20 @@ Options:
   --help                 Show this message and exit.
 ```
 
+## Recent updates
+
+- Added `archived` support end-to-end in schema and crawler extraction. (Issue #25)
+- Added `owner_type` (`Organization`/`User`) to schema and crawler mapping. (Issue #26)
+- Added `docs_url` detection via GitHub Pages
+  (`https://<owner>.github.io/<repo>/`) and included it in crawler output.
+  (Issue #23)
+- Fixed `on_central` / `on_example_oasis` deployment detection:
+  - API-first via `/api/v1/info`
+  - fallback to `nomad-distro` `pyproject.toml` plugin list
+  (Issue #22)
+- Improved deployment matching robustness by normalizing package names before
+  comparison.
+
 
 ## Main contributors
 | Name | E-mail     |

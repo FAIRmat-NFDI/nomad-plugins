@@ -198,7 +198,9 @@ def test_resolve_deployed_plugin_packages_falls_back_to_pyproject(monkeypatch):
     assert resolved == {'nomad-parser-plugins-atomistic'}
 
 
-def test_resolve_deployed_plugin_packages_returns_empty_when_both_sources_fail(monkeypatch):
+def test_resolve_deployed_plugin_packages_returns_empty_when_both_sources_fail(
+    monkeypatch,
+):
     async def fake_fetch_nomad_deployment_plugins_from_info(info_url):
         return set()
 

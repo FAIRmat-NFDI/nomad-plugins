@@ -38,7 +38,9 @@ def extract_dependency_name(dependency_string: str) -> str:
         The extracted dependency name, stripped of any extra information.
     """
     # Remove comments and markers (anything after # and ;)
-    dependency_string = dependency_string.split('#')[0].strip().split(';')[0].strip()
+    dependency_string = (
+        dependency_string.split('#', maxsplit=1)[0].strip().split(';')[0].strip()
+    )
 
     # Remove version specifiers (e.g., >=1.2.3, ==2.0) using regex
     dependency_string = re.sub(r'[<>=~!].*', '', dependency_string).strip()
@@ -364,7 +366,9 @@ class DeploymentInfoURLs(Enum):
 
 
 class DistroPyprojectURLs(Enum):
-    CENTRAL = 'https://gitlab.mpcdf.mpg.de/nomad-lab/nomad-distro/-/raw/main/pyproject.toml'
+    CENTRAL = (
+        'https://gitlab.mpcdf.mpg.de/nomad-lab/nomad-distro/-/raw/main/pyproject.toml'
+    )
     EXAMPLE = 'https://gitlab.mpcdf.mpg.de/nomad-lab/nomad-distro/-/raw/test-oasis/pyproject.toml'
 
 
@@ -395,9 +399,7 @@ async def fetch_nomad_deployment_plugins_from_pyproject(pyproject_url: str) -> s
         return set()
 
     plugins = (
-        pyproject.get('project', {})
-        .get('optional-dependencies', {})
-        .get('plugins', [])
+        pyproject.get('project', {}).get('optional-dependencies', {}).get('plugins', [])
     )
     normalized = {normalize_package_name(dep) for dep in plugins}
     normalized = {name for name in normalized if name}
@@ -446,7 +448,9 @@ async def resolve_deployed_plugin_packages(
     if deployed_plugins:
         return deployed_plugins
 
-    deployed_plugins = await fetch_nomad_deployment_plugins_from_pyproject(pyproject_url)
+    deployed_plugins = await fetch_nomad_deployment_plugins_from_pyproject(
+        pyproject_url
+    )
     if deployed_plugins:
         return deployed_plugins
     return set()

@@ -17,8 +17,7 @@ def test_importing_app():
         for column in plugin_app_entry_point.app.columns
     )
     assert any(
-        item.title == 'Archived'
-        and item.search_quantity == f'data.archived#{schema}'
+        item.title == 'Archived' and item.search_quantity == f'data.archived#{schema}'
         for item in plugin_app_entry_point.app.menu.items
     )
     assert any(

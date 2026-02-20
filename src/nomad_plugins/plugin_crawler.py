@@ -24,8 +24,6 @@ env_path = Path('.env')
 if env_path.exists():
     load_dotenv(env_path)
 
-DEBUG_DEPLOYMENT_MATCHING = os.getenv('PLUGIN_CRAWLER_DEBUG_MATCHING', '0') == '1'
-
 
 def extract_dependency_name(dependency_string: str) -> str:
     """Extracts the core dependency name from a dependency string,
@@ -389,15 +387,11 @@ async def fetch_nomad_deployment_plugins_from_pyproject(pyproject_url: str) -> s
     """
     response = await fetch_page_async(pyproject_url)
     if not response:
-        if DEBUG_DEPLOYMENT_MATCHING:
-            click.echo(f'[debug] Failed to fetch pyproject from {pyproject_url}')
         return set()
 
     try:
         pyproject = toml.loads(response.text)
     except toml.TomlDecodeError:
-        if DEBUG_DEPLOYMENT_MATCHING:
-            click.echo(f'[debug] Failed to parse TOML from {pyproject_url}')
         return set()
 
     plugins = (
@@ -407,11 +401,6 @@ async def fetch_nomad_deployment_plugins_from_pyproject(pyproject_url: str) -> s
     )
     normalized = {normalize_package_name(dep) for dep in plugins}
     normalized = {name for name in normalized if name}
-    if DEBUG_DEPLOYMENT_MATCHING:
-        click.echo(
-            f'[debug] Parsed {len(normalized)} plugin package names from {pyproject_url}'
-        )
-        click.echo(f'[debug] Sample pyproject plugin names: {sorted(normalized)[:10]}')
     return normalized
 
 
@@ -421,15 +410,11 @@ async def fetch_nomad_deployment_plugins_from_info(info_url: str) -> set[str]:
     """
     response = await fetch_page_async(info_url)
     if not response:
-        if DEBUG_DEPLOYMENT_MATCHING:
-            click.echo(f'[debug] Failed to fetch deployment info from {info_url}')
         return set()
 
     try:
         payload = response.json()
     except Exception:
-        if DEBUG_DEPLOYMENT_MATCHING:
-            click.echo(f'[debug] Failed to parse JSON from {info_url}')
         return set()
 
     plugin_packages = payload.get('plugin_packages', [])
@@ -446,12 +431,6 @@ async def fetch_nomad_deployment_plugins_from_info(info_url: str) -> set[str]:
     }
 
     result = {name for name in package_names.union(entry_point_packages) if name}
-    if DEBUG_DEPLOYMENT_MATCHING:
-        sample = sorted(result)[:10]
-        click.echo(
-            f'[debug] Parsed {len(result)} plugin package names from {info_url}'
-        )
-        click.echo(f'[debug] Sample deployed package names: {sample}')
     return result
 
 
@@ -715,14 +694,6 @@ async def find_plugins(
         info_url=DeploymentInfoURLs.CENTRAL.value,
         pyproject_url=DistroPyprojectURLs.CENTRAL.value,
     )
-    if DEBUG_DEPLOYMENT_MATCHING:
-        click.echo(
-            f'[debug] Central deployment packages resolved: {len(central_plugins)} entries'
-        )
-        click.echo(
-            f'[debug] Example oasis deployment packages resolved: '
-            f'{len(example_oasis_plugins)} entries'
-        )
 
     query = 'nomad.plugin in:file filename:pyproject.toml'
     params = {
@@ -756,19 +727,6 @@ async def find_plugins(
             if plugin:
                 plugins[plugin.name] = plugin
             bar.update(1)
-    if DEBUG_DEPLOYMENT_MATCHING:
-        on_central_count = sum(1 for plugin in plugins.values() if plugin.on_central)
-        on_example_count = sum(
-            1 for plugin in plugins.values() if plugin.on_example_oasis
-        )
-        click.echo(
-            f'[debug] Plugins matched on central: '
-            f'{on_central_count}/{len(plugins)}'
-        )
-        click.echo(
-            f'[debug] Plugins matched on example oasis: '
-            f'{on_example_count}/{len(plugins)}'
-        )
 
     data: list[PluginData] = []
 

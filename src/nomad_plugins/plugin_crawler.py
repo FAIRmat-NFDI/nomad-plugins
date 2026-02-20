@@ -24,6 +24,8 @@ env_path = Path('.env')
 if env_path.exists():
     load_dotenv(env_path)
 
+GITHUB_OWNER_REPO_PARTS = 2
+
 
 def extract_dependency_name(dependency_string: str) -> str:
     """Extracts the core dependency name from a dependency string,
@@ -38,7 +40,9 @@ def extract_dependency_name(dependency_string: str) -> str:
         The extracted dependency name, stripped of any extra information.
     """
     # Remove comments and markers (anything after # and ;)
-    dependency_string = dependency_string.split('#')[0].strip().split(';')[0].strip()
+    dependency_string = (
+        dependency_string.split('#', maxsplit=1)[0].strip().split(';')[0].strip()
+    )
 
     # Remove version specifiers (e.g., >=1.2.3, ==2.0) using regex
     dependency_string = re.sub(r'[<>=~!].*', '', dependency_string).strip()
@@ -50,6 +54,21 @@ def extract_dependency_name(dependency_string: str) -> str:
     dependency_string = re.sub(r'\s*;\s*extra.*', '', dependency_string).strip()
 
     return dependency_string
+
+
+def normalize_package_name(package_name: str) -> str:
+    """
+    Normalize package names for robust comparisons.
+
+    Uses a lightweight PEP 503-compatible normalization by lower-casing and
+    replacing runs of ``-_.`` with ``-``. Extras and non-package requirement
+    directives are ignored.
+    """
+    package_name = extract_dependency_name(package_name.strip())
+    if not package_name or package_name.startswith('-') or ' ' in package_name:
+        return ''
+    package_name = package_name.split('[', maxsplit=1)[0]
+    return re.sub(r'[-_.]+', '-', package_name).lower()
 
 
 class GitHubOwner(BaseModel):
@@ -322,8 +341,11 @@ class Plugin(BaseModel):
     created: str
     last_updated: str
     owner: str
+    owner_type: str | None = None
+    docs_url: HttpUrl | None = None
     name: str
     description: str | None = None
+    archived: bool
     all_dependencies: set[str] = Field(
         set(), description='Placeholder field to store all dependencies', exclude=True
     )
@@ -340,12 +362,16 @@ class PluginData(BaseModel):
     data: Plugin
 
 
-class OasisURLs(Enum):
-    CENTRAL = (
-        'https://gitlab.mpcdf.mpg.de/nomad-lab/nomad-distro/-/raw/main/requirements.txt'
-    )
+class DeploymentInfoURLs(Enum):
+    CENTRAL = 'https://nomad-lab.eu/prod/v1/api/v1/info'
+    EXAMPLE = 'https://nomad-lab.eu/prod/v1/oasis/api/v1/info'
 
-    EXAMPLE = 'https://gitlab.mpcdf.mpg.de/nomad-lab/nomad-distro/-/raw/test-oasis/requirements.txt'
+
+class DistroPyprojectURLs(Enum):
+    CENTRAL = (
+        'https://gitlab.mpcdf.mpg.de/nomad-lab/nomad-distro/-/raw/main/pyproject.toml'
+    )
+    EXAMPLE = 'https://gitlab.mpcdf.mpg.de/nomad-lab/nomad-distro/-/raw/test-oasis/pyproject.toml'
 
 
 # GitHub Code Search API URL
@@ -361,25 +387,74 @@ EXCLUDED_REPOS = {
 }
 
 
-async def fetch_nomad_deployment_requirements(
-    requirements_url: str,
+async def fetch_nomad_deployment_plugins_from_pyproject(pyproject_url: str) -> set[str]:
+    """
+    Fetch deployed plugin package names from nomad-distro `pyproject.toml`.
+    """
+    response = await fetch_page_async(pyproject_url)
+    if not response:
+        return set()
+
+    try:
+        pyproject = toml.loads(response.text)
+    except toml.TomlDecodeError:
+        return set()
+
+    plugins = (
+        pyproject.get('project', {}).get('optional-dependencies', {}).get('plugins', [])
+    )
+    normalized = {normalize_package_name(dep) for dep in plugins}
+    normalized = {name for name in normalized if name}
+    return normalized
+
+
+async def fetch_nomad_deployment_plugins_from_info(info_url: str) -> set[str]:
+    """
+    Fetch deployed plugin package names from NOMAD ``/api/v1/info``.
+    """
+    response = await fetch_page_async(info_url)
+    if not response:
+        return set()
+
+    try:
+        payload = response.json()
+    except Exception:
+        return set()
+
+    plugin_packages = payload.get('plugin_packages', [])
+    package_names = {
+        normalize_package_name(plugin_package.get('name', ''))
+        for plugin_package in plugin_packages
+    }
+
+    # Fallback signal in case package list is absent: infer names from entry points.
+    plugin_entry_points = payload.get('plugin_entry_points', [])
+    entry_point_packages = {
+        normalize_package_name(entry_point.get('python_package', ''))
+        for entry_point in plugin_entry_points
+    }
+
+    result = {name for name in package_names.union(entry_point_packages) if name}
+    return result
+
+
+async def resolve_deployed_plugin_packages(
+    *,
+    info_url: str,
+    pyproject_url: str,
 ) -> set[str]:
     """
-    Fetches and parses a `requirements.txt` file from a given URL.
-    Args:
-        requirements_url (str): The URL of the `requirements.txt` file.
-    Returns:
-        set: set of dependencies
+    Resolve deployed plugin packages using API-first strategy with pyproject fallback.
     """
-    response = await fetch_page_async(requirements_url)
-    if response:
-        return set(
-            [
-                # the first two lines are preamble by uv
-                extract_dependency_name(line)
-                for line in response.text.splitlines()[2:]
-            ]
-        )
+    deployed_plugins = await fetch_nomad_deployment_plugins_from_info(info_url)
+    if deployed_plugins:
+        return deployed_plugins
+
+    deployed_plugins = await fetch_nomad_deployment_plugins_from_pyproject(
+        pyproject_url
+    )
+    if deployed_plugins:
+        return deployed_plugins
     return set()
 
 
@@ -440,6 +515,37 @@ async def package_exists_on_pypi(package_name: str) -> bool:
             return False
 
 
+async def check_github_pages_exists(repository_url: str) -> str | None:
+    """
+    Check whether a repository has a standard GitHub Pages site.
+
+    For repositories like ``https://github.com/<owner>/<repo>`` this checks
+    ``https://<owner>.github.io/<repo>/``.
+    """
+    if 'github.com/' not in repository_url:
+        return None
+
+    try:
+        owner_repo = repository_url.rstrip('/').split('github.com/', maxsplit=1)[1]
+        parts = owner_repo.split('/')
+        if len(parts) < GITHUB_OWNER_REPO_PARTS:
+            return None
+        owner = parts[0]
+        repo = parts[1]
+    except (IndexError, ValueError):
+        return None
+
+    docs_url = f'https://{owner.lower()}.github.io/{repo}/'
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.head(docs_url, follow_redirects=True)
+            if response.status_code in (200, 301, 302):  # noqa: PLR2004
+                return docs_url
+        except httpx.RequestError:
+            return None
+    return None
+
+
 async def get_plugin(
     *,
     item: GitHubSearchResultItem,
@@ -466,24 +572,32 @@ async def get_plugin(
         return None
     repo_details = GitHubRepositoryDetailed.model_validate(repo_contents.json())
     name = project.name
-    on_pypi = await package_exists_on_pypi(name)
-    on_central = name in central_plugins
-    on_example_oasis = name in example_oasis_plugins
+    normalized_name = normalize_package_name(name)
+    on_pypi_task = package_exists_on_pypi(name)
+    docs_url_task = check_github_pages_exists(str(repo_info.html_url))
+    on_pypi, docs_url = await asyncio.gather(on_pypi_task, docs_url_task)
+    on_central = normalized_name in central_plugins
+    on_example_oasis = normalized_name in example_oasis_plugins
     plugin_entry_points = (
         project.entry_points.nomad_plugin if project.entry_points else []
     )
     authors = project.authors or []
     maintainers = project.maintainers or []
     all_dependencies = project.all_dependencies or set()
+    owner_type_raw = getattr(repo_info.owner, 'type', None)
+    owner_type = owner_type_raw if owner_type_raw in {'Organization', 'User'} else None
     plugin = Plugin(
         repository=repo_info.html_url,
         stars=repo_details.stargazers_count,
         created=repo_details.created_at,
         last_updated=repo_details.updated_at,
         owner=repo_info.owner.login,
+        owner_type=owner_type,
+        docs_url=docs_url,
         name=name,
         all_dependencies=all_dependencies,
         description=project.description,
+        archived=repo_details.archived,
         authors=authors,
         maintainers=maintainers,
         on_central=on_central,
@@ -578,10 +692,14 @@ async def find_plugins(
     Args:
         token (str): GitHub personal access token for authentication.
     """
-    example_oasis_plugins = await fetch_nomad_deployment_requirements(
-        OasisURLs.EXAMPLE.value
+    example_oasis_plugins = await resolve_deployed_plugin_packages(
+        info_url=DeploymentInfoURLs.EXAMPLE.value,
+        pyproject_url=DistroPyprojectURLs.EXAMPLE.value,
     )
-    central_plugins = await fetch_nomad_deployment_requirements(OasisURLs.CENTRAL.value)
+    central_plugins = await resolve_deployed_plugin_packages(
+        info_url=DeploymentInfoURLs.CENTRAL.value,
+        pyproject_url=DistroPyprojectURLs.CENTRAL.value,
+    )
 
     query = 'nomad.plugin in:file filename:pyproject.toml'
     params = {

@@ -75,7 +75,16 @@ class Plugin(Schema):
     owner = Quantity(
         type=str,
     )
+    owner_type = Quantity(
+        type=MEnum('Organization', 'User'),
+    )
+    docs_url = Quantity(
+        type=str,
+    )
     on_pypi = Quantity(
+        type=bool,
+    )
+    archived = Quantity(
         type=bool,
     )
     on_central = Quantity(

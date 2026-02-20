@@ -1,6 +1,10 @@
 data:
   m_def: nomad_plugins.schema_packages.plugin.Plugin
   repository: https://github.com/FAIRmat-NFDI/nomad-material-processing
+  owner: FAIRmat-NFDI
+  owner_type: Organization
+  docs_url: https://fairmat-nfdi.github.io/nomad-material-processing/
   on_pypi: True
+  archived: False
   name: nomad-material-processing
   description: A plugin for NOMAD containing base sections for material processing.

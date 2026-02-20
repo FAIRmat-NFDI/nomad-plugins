@@ -44,10 +44,13 @@ plugin_app_entry_point = AppEntryPoint(
             selected=[
                 f'data.name#{schema}',
                 f'data.owner#{schema}',
+                f'data.owner_type#{schema}',
+                f'data.docs_url#{schema}',
                 f'data.repository#{schema}',
                 f'data.on_central#{schema}',
                 f'data.on_example_oasis#{schema}',
                 f'data.on_pypi#{schema}',
+                f'data.archived#{schema}',
                 f'data.stars#{schema}',
             ],
             options={
@@ -56,6 +59,12 @@ plugin_app_entry_point = AppEntryPoint(
                 ),
                 f'data.owner#{schema}': Column(
                     label='Owner',
+                ),
+                f'data.owner_type#{schema}': Column(
+                    label='Owner type',
+                ),
+                f'data.docs_url#{schema}': Column(
+                    label='Docs',
                 ),
                 f'data.repository#{schema}': Column(
                     label='Repository',
@@ -68,6 +77,9 @@ plugin_app_entry_point = AppEntryPoint(
                 ),
                 f'data.on_pypi#{schema}': Column(
                     label='On PyPI',
+                ),
+                f'data.archived#{schema}': Column(
+                    label='Archived',
                 ),
                 f'data.stars#{schema}': Column(
                     label='Stars',
@@ -95,6 +107,13 @@ plugin_app_entry_point = AppEntryPoint(
                     title='Depends on',
                     show_input=True,
                     options=8,
+                ),
+                MenuItemTerms(
+                    search_quantity=f'data.owner_type#{schema}',
+                    title='Owner type',
+                    show_input=False,
+                    options=2,
+                    n_columns=2,
                 ),
                 MenuItemTerms(
                     search_quantity=f'data.plugin_entry_points.type#{schema}',
@@ -129,6 +148,13 @@ plugin_app_entry_point = AppEntryPoint(
                 MenuItemTerms(
                     search_quantity=f'data.on_pypi#{schema}',
                     title='On PyPI',
+                    show_input=False,
+                    options=2,
+                    n_columns=2,
+                ),
+                MenuItemTerms(
+                    search_quantity=f'data.archived#{schema}',
+                    title='Archived',
                     show_input=False,
                     options=2,
                     n_columns=2,

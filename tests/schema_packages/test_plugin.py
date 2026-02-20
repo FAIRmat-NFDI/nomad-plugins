@@ -15,3 +15,4 @@ def test_schema_package():
     assert entry_archive.metadata.comment == (
         'A plugin for NOMAD containing base sections for material processing.'
     )
+    assert entry_archive.data.archived is False

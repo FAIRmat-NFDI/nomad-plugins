@@ -324,6 +324,7 @@ class Plugin(BaseModel):
     owner: str
     name: str
     description: str | None = None
+    archived: bool
     all_dependencies: set[str] = Field(
         set(), description='Placeholder field to store all dependencies', exclude=True
     )
@@ -484,6 +485,7 @@ async def get_plugin(
         name=name,
         all_dependencies=all_dependencies,
         description=project.description,
+        archived=repo_details.archived,
         authors=authors,
         maintainers=maintainers,
         on_central=on_central,

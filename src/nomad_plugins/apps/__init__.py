@@ -48,6 +48,7 @@ plugin_app_entry_point = AppEntryPoint(
                 f'data.on_central#{schema}',
                 f'data.on_example_oasis#{schema}',
                 f'data.on_pypi#{schema}',
+                f'data.archived#{schema}',
                 f'data.stars#{schema}',
             ],
             options={
@@ -68,6 +69,9 @@ plugin_app_entry_point = AppEntryPoint(
                 ),
                 f'data.on_pypi#{schema}': Column(
                     label='On PyPI',
+                ),
+                f'data.archived#{schema}': Column(
+                    label='Archived',
                 ),
                 f'data.stars#{schema}': Column(
                     label='Stars',
@@ -129,6 +133,13 @@ plugin_app_entry_point = AppEntryPoint(
                 MenuItemTerms(
                     search_quantity=f'data.on_pypi#{schema}',
                     title='On PyPI',
+                    show_input=False,
+                    options=2,
+                    n_columns=2,
+                ),
+                MenuItemTerms(
+                    search_quantity=f'data.archived#{schema}',
+                    title='Archived',
                     show_input=False,
                     options=2,
                     n_columns=2,

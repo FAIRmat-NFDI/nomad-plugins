@@ -78,6 +78,9 @@ class Plugin(Schema):
     on_pypi = Quantity(
         type=bool,
     )
+    archived = Quantity(
+        type=bool,
+    )
     on_central = Quantity(
         type=bool,
     )

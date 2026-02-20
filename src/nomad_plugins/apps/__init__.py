@@ -45,6 +45,7 @@ plugin_app_entry_point = AppEntryPoint(
                 f'data.name#{schema}',
                 f'data.owner#{schema}',
                 f'data.owner_type#{schema}',
+                f'data.docs_url#{schema}',
                 f'data.repository#{schema}',
                 f'data.on_central#{schema}',
                 f'data.on_example_oasis#{schema}',
@@ -61,6 +62,9 @@ plugin_app_entry_point = AppEntryPoint(
                 ),
                 f'data.owner_type#{schema}': Column(
                     label='Owner type',
+                ),
+                f'data.docs_url#{schema}': Column(
+                    label='Docs',
                 ),
                 f'data.repository#{schema}': Column(
                     label='Repository',

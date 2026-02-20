@@ -3,6 +3,7 @@ data:
   repository: https://github.com/FAIRmat-NFDI/nomad-material-processing
   owner: FAIRmat-NFDI
   owner_type: Organization
+  docs_url: https://fairmat-nfdi.github.io/nomad-material-processing/
   on_pypi: True
   archived: False
   name: nomad-material-processing

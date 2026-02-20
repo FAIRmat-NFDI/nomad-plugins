@@ -323,6 +323,7 @@ class Plugin(BaseModel):
     last_updated: str
     owner: str
     owner_type: str | None = None
+    docs_url: HttpUrl | None = None
     name: str
     description: str | None = None
     archived: bool
@@ -442,6 +443,37 @@ async def package_exists_on_pypi(package_name: str) -> bool:
             return False
 
 
+async def check_github_pages_exists(repository_url: str) -> str | None:
+    """
+    Check whether a repository has a standard GitHub Pages site.
+
+    For repositories like ``https://github.com/<owner>/<repo>`` this checks
+    ``https://<owner>.github.io/<repo>/``.
+    """
+    if 'github.com/' not in repository_url:
+        return None
+
+    try:
+        owner_repo = repository_url.rstrip('/').split('github.com/', maxsplit=1)[1]
+        parts = owner_repo.split('/')
+        if len(parts) < 2:
+            return None
+        owner = parts[0]
+        repo = parts[1]
+    except (IndexError, ValueError):
+        return None
+
+    docs_url = f'https://{owner.lower()}.github.io/{repo}/'
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.head(docs_url, follow_redirects=True)
+            if response.status_code in (200, 301, 302):  # noqa: PLR2004
+                return docs_url
+        except httpx.RequestError:
+            return None
+    return None
+
+
 async def get_plugin(
     *,
     item: GitHubSearchResultItem,
@@ -468,7 +500,9 @@ async def get_plugin(
         return None
     repo_details = GitHubRepositoryDetailed.model_validate(repo_contents.json())
     name = project.name
-    on_pypi = await package_exists_on_pypi(name)
+    on_pypi_task = package_exists_on_pypi(name)
+    docs_url_task = check_github_pages_exists(str(repo_info.html_url))
+    on_pypi, docs_url = await asyncio.gather(on_pypi_task, docs_url_task)
     on_central = name in central_plugins
     on_example_oasis = name in example_oasis_plugins
     plugin_entry_points = (
@@ -486,6 +520,7 @@ async def get_plugin(
         last_updated=repo_details.updated_at,
         owner=repo_info.owner.login,
         owner_type=owner_type,
+        docs_url=docs_url,
         name=name,
         all_dependencies=all_dependencies,
         description=project.description,

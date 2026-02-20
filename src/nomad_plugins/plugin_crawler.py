@@ -24,6 +24,8 @@ env_path = Path('.env')
 if env_path.exists():
     load_dotenv(env_path)
 
+GITHUB_OWNER_REPO_PARTS = 2
+
 
 def extract_dependency_name(dependency_string: str) -> str:
     """Extracts the core dependency name from a dependency string,
@@ -526,7 +528,7 @@ async def check_github_pages_exists(repository_url: str) -> str | None:
     try:
         owner_repo = repository_url.rstrip('/').split('github.com/', maxsplit=1)[1]
         parts = owner_repo.split('/')
-        if len(parts) < 2:
+        if len(parts) < GITHUB_OWNER_REPO_PARTS:
             return None
         owner = parts[0]
         repo = parts[1]

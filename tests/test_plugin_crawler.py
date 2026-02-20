@@ -142,3 +142,124 @@ def test_check_github_pages_exists_non_github_url():
         plugin_crawler.check_github_pages_exists('https://gitlab.com/example/repo')
     )
     assert docs_url is None
+
+
+def test_resolve_deployed_plugin_packages_prefers_info_endpoint(monkeypatch):
+    async def fake_fetch_nomad_deployment_plugins_from_info(info_url):
+        return {'nomad-parser-plugins-workflow'}
+
+    async def fake_fetch_nomad_deployment_requirements(requirements_url):
+        return {'nomad-parser-plugins-atomistic'}
+
+    monkeypatch.setattr(
+        plugin_crawler,
+        'fetch_nomad_deployment_plugins_from_info',
+        fake_fetch_nomad_deployment_plugins_from_info,
+    )
+    monkeypatch.setattr(
+        plugin_crawler,
+        'fetch_nomad_deployment_plugins_from_pyproject',
+        fake_fetch_nomad_deployment_requirements,
+    )
+
+    resolved = asyncio.run(
+        plugin_crawler.resolve_deployed_plugin_packages(
+            info_url='https://nomad-lab.eu/prod/v1/api/v1/info',
+            pyproject_url='https://gitlab.example/pyproject.toml',
+            legacy_requirements_url='https://gitlab.example/requirements.txt',
+        )
+    )
+    assert resolved == {'nomad-parser-plugins-workflow'}
+
+
+def test_resolve_deployed_plugin_packages_falls_back_to_pyproject(monkeypatch):
+    async def fake_fetch_nomad_deployment_plugins_from_info(info_url):
+        return set()
+
+    async def fake_fetch_nomad_deployment_plugins_from_pyproject(pyproject_url):
+        return {'nomad-parser-plugins-atomistic'}
+
+    monkeypatch.setattr(
+        plugin_crawler,
+        'fetch_nomad_deployment_plugins_from_info',
+        fake_fetch_nomad_deployment_plugins_from_info,
+    )
+    monkeypatch.setattr(
+        plugin_crawler,
+        'fetch_nomad_deployment_plugins_from_pyproject',
+        fake_fetch_nomad_deployment_plugins_from_pyproject,
+    )
+
+    resolved = asyncio.run(
+        plugin_crawler.resolve_deployed_plugin_packages(
+            info_url='https://nomad-lab.eu/prod/v1/api/v1/info',
+            pyproject_url='https://gitlab.example/pyproject.toml',
+            legacy_requirements_url='https://gitlab.example/requirements.txt',
+        )
+    )
+    assert resolved == {'nomad-parser-plugins-atomistic'}
+
+
+def test_resolve_deployed_plugin_packages_falls_back_to_legacy_requirements(monkeypatch):
+    async def fake_fetch_nomad_deployment_plugins_from_info(info_url):
+        return set()
+
+    async def fake_fetch_nomad_deployment_plugins_from_pyproject(pyproject_url):
+        return set()
+
+    async def fake_fetch_nomad_deployment_requirements(requirements_url):
+        return {'nomad-parser-plugins-workflow'}
+
+    monkeypatch.setattr(
+        plugin_crawler,
+        'fetch_nomad_deployment_plugins_from_info',
+        fake_fetch_nomad_deployment_plugins_from_info,
+    )
+    monkeypatch.setattr(
+        plugin_crawler,
+        'fetch_nomad_deployment_plugins_from_pyproject',
+        fake_fetch_nomad_deployment_plugins_from_pyproject,
+    )
+    monkeypatch.setattr(
+        plugin_crawler,
+        'fetch_nomad_deployment_requirements',
+        fake_fetch_nomad_deployment_requirements,
+    )
+
+    resolved = asyncio.run(
+        plugin_crawler.resolve_deployed_plugin_packages(
+            info_url='https://nomad-lab.eu/prod/v1/api/v1/info',
+            pyproject_url='https://gitlab.example/pyproject.toml',
+            legacy_requirements_url='https://gitlab.example/requirements.txt',
+        )
+    )
+    assert resolved == {'nomad-parser-plugins-workflow'}
+
+
+def test_fetch_nomad_deployment_plugins_from_pyproject(monkeypatch):
+    pyproject_toml = """
+[project]
+name = "nomad-distribution"
+[project.optional-dependencies]
+plugins = [
+  "nomad-plugin-gui>=1.0.0",
+  "nomad-porous-materials @ git+https://github.com/FAIRmat-NFDI/nomad-porous-materials.git@abc",
+  "pynxtools[convert]==0.9.1",
+]
+"""
+
+    async def fake_fetch_page_async(url, *, headers=None, params=None):
+        class FakeResponse:
+            text = pyproject_toml
+
+        return FakeResponse()
+
+    monkeypatch.setattr(plugin_crawler, 'fetch_page_async', fake_fetch_page_async)
+    parsed = asyncio.run(
+        plugin_crawler.fetch_nomad_deployment_plugins_from_pyproject(
+            'https://gitlab.example/pyproject.toml'
+        )
+    )
+    assert 'nomad-plugin-gui' in parsed
+    assert 'nomad-porous-materials' in parsed
+    assert 'pynxtools' in parsed

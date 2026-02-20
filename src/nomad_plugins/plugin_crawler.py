@@ -24,6 +24,8 @@ env_path = Path('.env')
 if env_path.exists():
     load_dotenv(env_path)
 
+DEBUG_DEPLOYMENT_MATCHING = os.getenv('PLUGIN_CRAWLER_DEBUG_MATCHING', '0') == '1'
+
 
 def extract_dependency_name(dependency_string: str) -> str:
     """Extracts the core dependency name from a dependency string,
@@ -50,6 +52,21 @@ def extract_dependency_name(dependency_string: str) -> str:
     dependency_string = re.sub(r'\s*;\s*extra.*', '', dependency_string).strip()
 
     return dependency_string
+
+
+def normalize_package_name(package_name: str) -> str:
+    """
+    Normalize package names for robust comparisons.
+
+    Uses a lightweight PEP 503-compatible normalization by lower-casing and
+    replacing runs of ``-_.`` with ``-``. Extras and non-package requirement
+    directives are ignored.
+    """
+    package_name = extract_dependency_name(package_name.strip())
+    if not package_name or package_name.startswith('-') or ' ' in package_name:
+        return ''
+    package_name = package_name.split('[', maxsplit=1)[0]
+    return re.sub(r'[-_.]+', '-', package_name).lower()
 
 
 class GitHubOwner(BaseModel):
@@ -351,6 +368,16 @@ class OasisURLs(Enum):
     EXAMPLE = 'https://gitlab.mpcdf.mpg.de/nomad-lab/nomad-distro/-/raw/test-oasis/requirements.txt'
 
 
+class DeploymentInfoURLs(Enum):
+    CENTRAL = 'https://nomad-lab.eu/prod/v1/api/v1/info'
+    EXAMPLE = 'https://nomad-lab.eu/prod/v1/oasis/api/v1/info'
+
+
+class DistroPyprojectURLs(Enum):
+    CENTRAL = 'https://gitlab.mpcdf.mpg.de/nomad-lab/nomad-distro/-/raw/main/pyproject.toml'
+    EXAMPLE = 'https://gitlab.mpcdf.mpg.de/nomad-lab/nomad-distro/-/raw/test-oasis/pyproject.toml'
+
+
 # GitHub Code Search API URL
 GITHUB_CODE_API = 'https://api.github.com/search/code'
 GITHUB_REPO_API = 'https://api.github.com/repos'
@@ -376,13 +403,115 @@ async def fetch_nomad_deployment_requirements(
     """
     response = await fetch_page_async(requirements_url)
     if response:
-        return set(
-            [
-                # the first two lines are preamble by uv
-                extract_dependency_name(line)
-                for line in response.text.splitlines()[2:]
-            ]
+        requirements = {
+            normalize_package_name(line) for line in response.text.splitlines()
+        }
+        requirements = {dep for dep in requirements if dep}
+        if DEBUG_DEPLOYMENT_MATCHING:
+            sample = sorted(requirements)[:10]
+            click.echo(
+                f'[debug] Parsed {len(requirements)} dependencies from {requirements_url}'
+            )
+            click.echo(f'[debug] Sample dependencies: {sample}')
+        return requirements
+    if DEBUG_DEPLOYMENT_MATCHING:
+        click.echo(f'[debug] Failed to fetch requirements from {requirements_url}')
+    return set()
+
+
+async def fetch_nomad_deployment_plugins_from_pyproject(pyproject_url: str) -> set[str]:
+    """
+    Fetch deployed plugin package names from nomad-distro `pyproject.toml`.
+    """
+    response = await fetch_page_async(pyproject_url)
+    if not response:
+        if DEBUG_DEPLOYMENT_MATCHING:
+            click.echo(f'[debug] Failed to fetch pyproject from {pyproject_url}')
+        return set()
+
+    try:
+        pyproject = toml.loads(response.text)
+    except toml.TomlDecodeError:
+        if DEBUG_DEPLOYMENT_MATCHING:
+            click.echo(f'[debug] Failed to parse TOML from {pyproject_url}')
+        return set()
+
+    plugins = (
+        pyproject.get('project', {})
+        .get('optional-dependencies', {})
+        .get('plugins', [])
+    )
+    normalized = {normalize_package_name(dep) for dep in plugins}
+    normalized = {name for name in normalized if name}
+    if DEBUG_DEPLOYMENT_MATCHING:
+        click.echo(
+            f'[debug] Parsed {len(normalized)} plugin package names from {pyproject_url}'
         )
+        click.echo(f'[debug] Sample pyproject plugin names: {sorted(normalized)[:10]}')
+    return normalized
+
+
+async def fetch_nomad_deployment_plugins_from_info(info_url: str) -> set[str]:
+    """
+    Fetch deployed plugin package names from NOMAD ``/api/v1/info``.
+    """
+    response = await fetch_page_async(info_url)
+    if not response:
+        if DEBUG_DEPLOYMENT_MATCHING:
+            click.echo(f'[debug] Failed to fetch deployment info from {info_url}')
+        return set()
+
+    try:
+        payload = response.json()
+    except Exception:
+        if DEBUG_DEPLOYMENT_MATCHING:
+            click.echo(f'[debug] Failed to parse JSON from {info_url}')
+        return set()
+
+    plugin_packages = payload.get('plugin_packages', [])
+    package_names = {
+        normalize_package_name(plugin_package.get('name', ''))
+        for plugin_package in plugin_packages
+    }
+
+    # Fallback signal in case package list is absent: infer names from entry points.
+    plugin_entry_points = payload.get('plugin_entry_points', [])
+    entry_point_packages = {
+        normalize_package_name(entry_point.get('python_package', ''))
+        for entry_point in plugin_entry_points
+    }
+
+    result = {name for name in package_names.union(entry_point_packages) if name}
+    if DEBUG_DEPLOYMENT_MATCHING:
+        sample = sorted(result)[:10]
+        click.echo(
+            f'[debug] Parsed {len(result)} plugin package names from {info_url}'
+        )
+        click.echo(f'[debug] Sample deployed package names: {sample}')
+    return result
+
+
+async def resolve_deployed_plugin_packages(
+    *,
+    info_url: str,
+    pyproject_url: str,
+    legacy_requirements_url: str | None = None,
+) -> set[str]:
+    """
+    Resolve deployed plugin packages using API-first strategy with pyproject fallback.
+    """
+    deployed_plugins = await fetch_nomad_deployment_plugins_from_info(info_url)
+    if deployed_plugins:
+        return deployed_plugins
+
+    deployed_plugins = await fetch_nomad_deployment_plugins_from_pyproject(pyproject_url)
+    if deployed_plugins:
+        return deployed_plugins
+
+    if DEBUG_DEPLOYMENT_MATCHING:
+        click.echo('[debug] Falling back to legacy requirements-based matching')
+    if legacy_requirements_url:
+        return await fetch_nomad_deployment_requirements(legacy_requirements_url)
     return set()
 
 
@@ -500,11 +629,12 @@ async def get_plugin(
         return None
     repo_details = GitHubRepositoryDetailed.model_validate(repo_contents.json())
     name = project.name
+    normalized_name = normalize_package_name(name)
     on_pypi_task = package_exists_on_pypi(name)
     docs_url_task = check_github_pages_exists(str(repo_info.html_url))
     on_pypi, docs_url = await asyncio.gather(on_pypi_task, docs_url_task)
-    on_central = name in central_plugins
-    on_example_oasis = name in example_oasis_plugins
+    on_central = normalized_name in central_plugins
+    on_example_oasis = normalized_name in example_oasis_plugins
     plugin_entry_points = (
         project.entry_points.nomad_plugin if project.entry_points else []
     )
@@ -619,10 +749,24 @@ async def find_plugins(
     Args:
         token (str): GitHub personal access token for authentication.
     """
-    example_oasis_plugins = await fetch_nomad_deployment_requirements(
-        OasisURLs.EXAMPLE.value
+    example_oasis_plugins = await resolve_deployed_plugin_packages(
+        info_url=DeploymentInfoURLs.EXAMPLE.value,
+        pyproject_url=DistroPyprojectURLs.EXAMPLE.value,
+        legacy_requirements_url=OasisURLs.EXAMPLE.value,
     )
-    central_plugins = await fetch_nomad_deployment_requirements(OasisURLs.CENTRAL.value)
+    central_plugins = await resolve_deployed_plugin_packages(
+        info_url=DeploymentInfoURLs.CENTRAL.value,
+        pyproject_url=DistroPyprojectURLs.CENTRAL.value,
+        legacy_requirements_url=OasisURLs.CENTRAL.value,
+    )
+    if DEBUG_DEPLOYMENT_MATCHING:
+        click.echo(
+            f'[debug] Central requirements parsed: {len(central_plugins)} entries'
+        )
+        click.echo(
+            f'[debug] Example oasis requirements parsed: '
+            f'{len(example_oasis_plugins)} entries'
+        )
 
     query = 'nomad.plugin in:file filename:pyproject.toml'
     params = {
@@ -656,6 +800,19 @@ async def find_plugins(
             if plugin:
                 plugins[plugin.name] = plugin
             bar.update(1)
+    if DEBUG_DEPLOYMENT_MATCHING:
+        on_central_count = sum(1 for plugin in plugins.values() if plugin.on_central)
+        on_example_count = sum(
+            1 for plugin in plugins.values() if plugin.on_example_oasis
+        )
+        click.echo(
+            f'[debug] Plugins matched on central: '
+            f'{on_central_count}/{len(plugins)}'
+        )
+        click.echo(
+            f'[debug] Plugins matched on example oasis: '
+            f'{on_example_count}/{len(plugins)}'
+        )
 
     data: list[PluginData] = []
 

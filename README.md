@@ -56,9 +56,9 @@ Usage: plugin-crawler [OPTIONS]
 
       entry_points:
 
-          options:
+              options:
 
-              nomad_plugins.apps:plugin_app_entry_point:
+              nomad_plugins_metadata.schema_packages:schema_package_entry_point:
               upload_id: <upload-id>
 
 Options:

@@ -11,18 +11,29 @@ from nomad.config.models.ui import (
     SearchQuantities,
 )
 
-schema = 'nomad_plugins.schema_packages.plugin.Plugin'
+schema = 'nomad_plugins_metadata.schema_packages.schema_package.PluginMetadata'
 filters_locked = {
     'section_defs.definition_qualified_name': [schema],
-    'entry_type': 'Plugin',
+    'entry_type': 'PluginMetadata',
 }
 
+
 # Workaround: read the upload_ids from plugin's raw config.
+def _read_upload_id() -> str | None:
+    entry_key = 'nomad_plugins_metadata.schema_packages:schema_package_entry_point'
+    try:
+        options = _plugins.get('entry_points', {}).get('options', {})
+        entry = options.get(entry_key)
+        if isinstance(entry, dict):
+            return entry.get('upload_id')
+        return getattr(entry, 'upload_id', None)
+    except Exception:
+        return None
+
+
 try:
-    upload_id = _plugins['entry_points']['options'][
-        'nomad_plugins.schema_packages:schema_package_entry_point'
-    ]['upload_id']
-except KeyError:
+    upload_id = _read_upload_id()
+except Exception:
     upload_id = None
 
 if upload_id:
@@ -45,11 +56,11 @@ plugin_app_entry_point = AppEntryPoint(
                 f'data.name#{schema}',
                 f'data.owner#{schema}',
                 f'data.owner_type#{schema}',
-                f'data.docs_url#{schema}',
-                f'data.repository#{schema}',
-                f'data.on_central#{schema}',
-                f'data.on_example_oasis#{schema}',
-                f'data.on_pypi#{schema}',
+                f'data.documentation#{schema}',
+                f'data.upstream_repository#{schema}',
+                f'data.deployment.on_central#{schema}',
+                f'data.deployment.on_example_oasis#{schema}',
+                f'data.deployment.on_pypi#{schema}',
                 f'data.archived#{schema}',
                 f'data.stars#{schema}',
             ],
@@ -63,19 +74,19 @@ plugin_app_entry_point = AppEntryPoint(
                 f'data.owner_type#{schema}': Column(
                     label='Owner type',
                 ),
-                f'data.docs_url#{schema}': Column(
+                f'data.documentation#{schema}': Column(
                     label='Docs',
                 ),
-                f'data.repository#{schema}': Column(
+                f'data.upstream_repository#{schema}': Column(
                     label='Repository',
                 ),
-                f'data.on_central#{schema}': Column(
+                f'data.deployment.on_central#{schema}': Column(
                     label='On central NOMAD',
                 ),
-                f'data.on_example_oasis#{schema}': Column(
+                f'data.deployment.on_example_oasis#{schema}': Column(
                     label='On NOMAD example oasis',
                 ),
-                f'data.on_pypi#{schema}': Column(
+                f'data.deployment.on_pypi#{schema}': Column(
                     label='On PyPI',
                 ),
                 f'data.archived#{schema}': Column(
@@ -103,7 +114,7 @@ plugin_app_entry_point = AppEntryPoint(
                     options=8,
                 ),
                 MenuItemTerms(
-                    search_quantity=f'data.plugin_dependencies.name#{schema}',
+                    search_quantity=f'data.schema_dependencies.package_name#{schema}',
                     title='Depends on',
                     show_input=True,
                     options=8,
@@ -116,10 +127,10 @@ plugin_app_entry_point = AppEntryPoint(
                     n_columns=2,
                 ),
                 MenuItemTerms(
-                    search_quantity=f'data.plugin_entry_points.type#{schema}',
+                    search_quantity=f'data.entry_points.capability_type#{schema}',
                     title='Plugin entry points',
                     show_input=False,
-                    options=5,
+                    options=8,
                 ),
                 MenuItemHistogram(
                     x=f'data.created#{schema}',
@@ -132,21 +143,21 @@ plugin_app_entry_point = AppEntryPoint(
                     show_input=False,
                 ),
                 MenuItemTerms(
-                    search_quantity=f'data.on_central#{schema}',
+                    search_quantity=f'data.deployment.on_central#{schema}',
                     title='On central NOMAD',
                     show_input=False,
                     options=2,
                     n_columns=2,
                 ),
                 MenuItemTerms(
-                    search_quantity=f'data.on_example_oasis#{schema}',
+                    search_quantity=f'data.deployment.on_example_oasis#{schema}',
                     title='On NOMAD example oasis',
                     show_input=False,
                     options=2,
                     n_columns=2,
                 ),
                 MenuItemTerms(
-                    search_quantity=f'data.on_pypi#{schema}',
+                    search_quantity=f'data.deployment.on_pypi#{schema}',
                     title='On PyPI',
                     show_input=False,
                     options=2,

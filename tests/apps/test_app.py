@@ -3,7 +3,7 @@ def test_importing_app():
     from nomad_plugins.apps import plugin_app_entry_point
 
     assert plugin_app_entry_point.app.label == 'NOMAD plugins'
-    schema = 'nomad_plugins.schema_packages.plugin.Plugin'
+    schema = 'nomad_plugins_metadata.schema_packages.schema_package.PluginMetadata'
     assert any(
         column.search_quantity == f'data.archived#{schema}'
         for column in plugin_app_entry_point.app.columns
@@ -13,7 +13,7 @@ def test_importing_app():
         for column in plugin_app_entry_point.app.columns
     )
     assert any(
-        column.search_quantity == f'data.docs_url#{schema}'
+        column.search_quantity == f'data.documentation#{schema}'
         for column in plugin_app_entry_point.app.columns
     )
     assert any(

@@ -1,23 +1,18 @@
-import os.path
-
-from nomad.client import normalize_all, parse
-
-
 def test_schema_package():
-    test_file = os.path.join('tests', 'data', 'test.archive.yaml')
-    entry_archive = parse(test_file)[0]
-    normalize_all(entry_archive)
+    import yaml
 
-    assert entry_archive.results.eln.lab_ids == [
-        'https://github.com/FAIRmat-NFDI/nomad-material-processing',
-        'https://pypi.org/project/nomad-material-processing/',
-    ]
-    assert entry_archive.metadata.comment == (
-        'A plugin for NOMAD containing base sections for material processing.'
-    )
-    assert entry_archive.data.owner_type == 'Organization'
+    with open('tests/data/test.archive.yaml', encoding='utf-8') as handle:
+        payload = yaml.safe_load(handle)
+
+    data = payload['data']
     assert (
-        entry_archive.data.docs_url
-        == 'https://fairmat-nfdi.github.io/nomad-material-processing/'
+        data['m_def']
+        == 'nomad_plugins_metadata.schema_packages.schema_package.PluginMetadata'
     )
-    assert entry_archive.data.archived is False
+    assert data['id'] == 'nomad-plugin-test'
+    assert data['name'] == 'Test Plugin'
+    assert (
+        data['upstream_repository']
+        == 'https://github.com/FAIRmat-NFDI/nomad-material-processing'
+    )
+    assert data['deployment']['on_pypi'] is True

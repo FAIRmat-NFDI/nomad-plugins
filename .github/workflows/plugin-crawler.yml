@@ -7,6 +7,10 @@ on:
   workflow_dispatch:
     # Allow manual triggering of the workflow
 
+concurrency:
+  group: plugin-crawler
+  cancel-in-progress: true
+
 jobs:
   run-plugin-crawler:
     runs-on: ubuntu-latest

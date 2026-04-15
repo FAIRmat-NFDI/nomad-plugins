@@ -26,12 +26,12 @@ maintainers = [
 license = { file = "LICENSE" }
 dependencies = [
     "nomad-lab>=1.3.0",
+    "nomad-plugins-metadata @ git+https://github.com/FAIRmat-NFDI/nomad-plugins-metadata.git@v0.8.0",
     "python-magic-bin; sys_platform == 'win32'",
-    "toml",
     "click",
     "requests",
     "httpx>=0.27.2",
-    "pydantic>=2",
+    "pyyaml",
     "python-dotenv",
 ]
 
@@ -122,9 +122,6 @@ where = ["src"]
 [tool.setuptools_scm]
 
 [project.entry-points.'nomad.plugin']
-
-schema_package_entry_point = "nomad_plugins.schema_packages:schema_package_entry_point"
-
 plugin_app_entry_point = "nomad_plugins.apps:plugin_app_entry_point"
 
 [tool.cruft]

@@ -1,10 +1,20 @@
 data:
-  m_def: nomad_plugins.schema_packages.plugin.Plugin
-  repository: https://github.com/FAIRmat-NFDI/nomad-material-processing
+  m_def: nomad_plugins_metadata.schema_packages.schema_package.PluginMetadata
+  id: nomad-plugin-test
+  metadata_schema_version: 1.0.0
+  name: Test Plugin
+  description: A plugin for NOMAD containing base sections for material processing.
+  upstream_repository: https://github.com/FAIRmat-NFDI/nomad-material-processing
+  documentation: https://fairmat-nfdi.github.io/nomad-material-processing/
   owner: FAIRmat-NFDI
   owner_type: Organization
-  docs_url: https://fairmat-nfdi.github.io/nomad-material-processing/
-  on_pypi: True
-  archived: False
-  name: nomad-material-processing
-  description: A plugin for NOMAD containing base sections for material processing.
+  archived: false
+  stars: 42
+  created: 2024-01-01T00:00:00Z
+  last_updated: 2025-01-01T00:00:00Z
+  maturity: stable
+  deployment:
+    on_central: true
+    on_example_oasis: false
+    on_pypi: true
+    pypi_package: nomad-material-processing

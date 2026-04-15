@@ -136,7 +136,9 @@ async def _load_repository_metadata_file(
 async def _download_tarball(
     candidate: CandidateRepo, *, headers: dict, destination: Path
 ) -> Path | None:
-    tarball_url = f'https://api.github.com/repos/{candidate.full_name}/tarball/{candidate.ref}'
+    tarball_url = (
+        f'https://api.github.com/repos/{candidate.full_name}/tarball/{candidate.ref}'
+    )
     response = await fetch_page_async(url=tarball_url, headers=headers)
     if response is None:
         return None

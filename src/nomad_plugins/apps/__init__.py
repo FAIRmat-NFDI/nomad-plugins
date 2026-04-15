@@ -17,6 +17,7 @@ filters_locked = {
     'entry_type': 'PluginMetadata',
 }
 
+
 # Workaround: read the upload_ids from plugin's raw config.
 def _read_upload_id() -> str | None:
     entry_key = 'nomad_plugins_metadata.schema_packages:schema_package_entry_point'

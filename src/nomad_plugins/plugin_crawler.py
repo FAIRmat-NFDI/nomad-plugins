@@ -38,7 +38,8 @@ def extract_dependency_name(dependency_string: str) -> str:
         The extracted dependency name, stripped of any extra information.
     """
     # Remove comments and markers (anything after # and ;)
-    dependency_string = dependency_string.split('#')[0].strip().split(';')[0].strip()
+    dependency_string = dependency_string.split('#', 1)[0].strip()
+    dependency_string = dependency_string.split(';', 1)[0].strip()
 
     # Remove version specifiers (e.g., >=1.2.3, ==2.0) using regex
     dependency_string = re.sub(r'[<>=~!].*', '', dependency_string).strip()

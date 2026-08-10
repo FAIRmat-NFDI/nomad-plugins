@@ -141,6 +141,25 @@ class RegistrySnapshotTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'excludeCandidates'):
                 load_config(config_path)
 
+    def test_rejects_invalid_search_request_delay(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            config_path = Path(temporary_directory) / 'config.json'
+            config_path.write_text(
+                json.dumps(
+                    {
+                        'github': {
+                            'searchQueries': ['nomad.plugin filename:pyproject.toml'],
+                            'excludeCandidates': [],
+                            'searchRequestDelaySeconds': -1,
+                        },
+                        'quality': {'minimumPluginCount': 0},
+                    },
+                ),
+            )
+
+            with self.assertRaisesRegex(ValueError, 'searchRequestDelaySeconds'):
+                load_config(config_path)
+
 
 def load_fixture(name: str) -> dict:
     return copy.deepcopy(load_snapshot_data(FIXTURES_PATH / name))

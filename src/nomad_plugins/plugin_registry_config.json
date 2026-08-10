@@ -1,0 +1,116 @@
+{
+  "github": {
+    "searchQueries": [
+      "nomad.plugin in:file filename:pyproject.toml",
+      "nomad-lab in:file filename:pyproject.toml",
+      "nomad_plugin_metadata filename:nomad_plugin_metadata.yaml",
+      "nomad_plugin_metadata filename:nomad_plugin_metadata.yml"
+    ],
+    "repositorySearchQueries": [
+      "nomad plugin in:name,description",
+      "topic:north-tool",
+      "nomad-ientrance in:name,description",
+      "nomad-measurements in:name,description",
+      "nomad-parser in:name,description",
+      "nomad-semantic in:name,description",
+      "nomad-schema in:name,description",
+      "org:FAIRmat-NFDI nomad in:name,description",
+      "org:nomad-coe nomad in:name,description",
+      "org:nomad-hzb nomad in:name,description",
+      "org:glaidedata nomad in:name,description",
+      "org:IKZ-Berlin nomad in:name,description",
+      "org:AddMorePower nomad in:name,description",
+      "org:MPI-CPfS-Dresden nomad in:name,description",
+      "org:ZBT-Tools nomad in:name,description",
+      "org:CAU-Kiel nomad in:name,description",
+      "org:CCP-NC nomad in:name,description",
+      "org:CRC1415 nomad in:name,description",
+      "org:sd-fbk nomad in:name,description",
+      "org:Automate-Solar nomad in:name,description",
+      "org:BAMresearch nomad in:name,description",
+      "org:DTU-Nanolab-materials-discovery nomad in:name,description",
+      "org:exp4-age nomad in:name,description",
+      "org:FAU-LAP nomad in:name,description",
+      "org:IMEM-CNR-Parma nomad in:name,description",
+      "org:MaMMoS-project nomad in:name,description",
+      "org:OpenCOMPES nomad in:name,description",
+      "org:PDI-Berlin nomad in:name,description",
+      "org:QYB-Quantum-Yield-Berlin-GmbH nomad in:name,description",
+      "org:Thin-Layers-Technology-Innsbruck nomad in:name,description"
+    ],
+    "maxRepositoryCandidates": 120,
+    "searchRequestDelaySeconds": 2.0,
+    "excludeForks": true,
+    "excludeCandidates": [
+      "github.com/fairmat-nfdi/cookiecutter-nomad-plugin#{{cookiecutter.plugin_name}}",
+      "github.com/fairmat-nfdi/pynxtools-plugin-template#pynxtools-{{cookiecutter.reader_name}}"
+    ],
+    "excludeDocumentationUrls": [
+      "https://fairmat-nfdi.github.io/nomad-parser-w2dynamics/",
+      "https://github.com/FAIRmat-NFDI/AreaA-data_modeling_and_schemas/tree/main/RTG_SIMS",
+      "https://github.com/nomad-coe/nomad-parser-example-plugin",
+      "https://josepizarro3.github.io/nomad-networkx/",
+      "https://marzieh-saeedimasine.github.io/nomad-plugin-spectroscopy",
+      "https://oscarpes.readthedocs.io/"
+    ],
+    "excludePypiUrls": [
+      "https://pypi.org/project/nomad-semantic-web-service/"
+    ],
+    "officialTemplateRepositories": [
+      {
+        "repository": "FAIRmat-NFDI/cookiecutter-nomad-plugin",
+        "name": "cookiecutter-nomad-plugin",
+        "description": "A cookiecutter template for creating NOMAD plugin repositories."
+      },
+      {
+        "repository": "FAIRmat-NFDI/nomad-plugin-template",
+        "name": "nomad-plugin-template",
+        "description": "A template repository for creating a repository with a NOMAD plugin package."
+      },
+      {
+        "repository": "FAIRmat-NFDI/nomad-distro-dev",
+        "name": "nomad-distro-dev",
+        "description": "A development template repository for creating NOMAD distributions with custom plugins."
+      },
+      {
+        "repository": "FAIRmat-NFDI/nomad-distro-template",
+        "name": "nomad-distro-template",
+        "description": "A template repository for creating NOMAD distributions with custom plugins."
+      },
+      {
+        "repository": "FAIRmat-NFDI/pynxtools-plugin-template",
+        "name": "pynxtools-plugin-template",
+        "description": "A cookiecutter template for creating pynxtools-based NOMAD plugins."
+      }
+    ],
+    "officialSoftwareRepositories": [
+      {
+        "repository": "FAIRmat-NFDI/nomad",
+        "name": "nomad-lab",
+        "description": "The core NOMAD research data management platform."
+      },
+      {
+        "repository": "FAIRmat-NFDI/nomad-docs",
+        "name": "nomad-docs",
+        "description": "The official NOMAD documentation."
+      },
+      {
+        "repository": "FAU-LAP/NOMAD-CAMELS",
+        "name": "NOMAD-CAMELS",
+        "description": "Configurable Application for Measurements, Experiments and Laboratory-Systems."
+      }
+    ]
+  },
+  "ownerGroups": {
+    "fairmat": [
+      "fairmat-nfdi"
+    ]
+  },
+  "quality": {
+    "minimumPluginCount": 0
+  },
+  "deploymentSources": {
+    "centralRequirementsUrl": "https://gitlab.mpcdf.mpg.de/nomad-lab/nomad-FAIR/-/raw/develop/requirements-plugins.txt",
+    "exampleOasisRequirementsUrl": "https://gitlab.mpcdf.mpg.de/nomad-lab/nomad-distro-dev/-/raw/main/requirements.txt"
+  }
+}

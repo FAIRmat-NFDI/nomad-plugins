@@ -65,6 +65,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> dict[str, Any]:
     )
     exclude_forks = github.get('excludeForks', False)
     max_repository_candidates = github.get('maxRepositoryCandidates')
+    search_request_delay_seconds = github.get('searchRequestDelaySeconds', 0)
 
     if len(search_queries) == 0:
         raise ValueError('github.searchQueries must contain at least one query.')
@@ -106,6 +107,15 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> dict[str, Any]:
         or max_repository_candidates <= 0
     ):
         raise ValueError('github.maxRepositoryCandidates must be a positive integer.')
+
+    if (
+        not isinstance(search_request_delay_seconds, int | float)
+        or isinstance(search_request_delay_seconds, bool)
+        or search_request_delay_seconds < 0
+    ):
+        raise ValueError(
+            'github.searchRequestDelaySeconds must be a non-negative number.',
+        )
 
     quality = require_mapping(config, 'quality', 'config')
     minimum_plugin_count = require_int(quality, 'minimumPluginCount', 'quality')

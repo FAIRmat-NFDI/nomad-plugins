@@ -43,6 +43,7 @@ dev = ["ruff", "pytest", "structlog"]
 
 [project.scripts]
 plugin-crawler = "nomad_plugins.plugin_crawler:main"
+plugin-registry = "nomad_plugins.cli:main"
 
 [tool.ruff]
 # Exclude a variety of commonly ignored directories.
@@ -118,6 +119,9 @@ package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"nomad_plugins" = ["plugin_registry_config.json"]
 
 [tool.setuptools_scm]
 

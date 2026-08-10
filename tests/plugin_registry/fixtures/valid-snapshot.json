@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 2,
+  "dataUpdatedAt": "2026-07-20T00:00:00Z",
+  "sourceSummary": {
+    "discovery": "fixture",
+    "pluginCount": 1,
+    "registryVisibleCount": 1,
+    "projectKindCounts": {
+      "plugin": 1
+    },
+    "warningCount": 1
+  },
+  "plugins": [
+    {
+      "id": "github.com/example/nomad-parser#packages/parser",
+      "name": "Example NOMAD Parser",
+      "description": "Fixture parser plugin used by maintenance tests.",
+      "repositoryUrl": "https://github.com/example/nomad-parser",
+      "documentationUrl": "https://example.github.io/nomad-parser",
+      "pypiUrl": "https://pypi.org/project/example-nomad-parser/",
+      "owner": "example",
+      "ownerGroup": "community",
+      "entrypoints": [
+        {
+          "name": "example_parser",
+          "module": "example_nomad_parser:entrypoint",
+          "type": "parser"
+        }
+      ],
+      "pluginTypes": ["parser"],
+      "dependencies": ["nomad-lab"],
+      "status": {
+        "archived": false,
+        "fork": false,
+        "stars": 12,
+        "createdAt": "2024-01-01T00:00:00Z",
+        "lastPushedAt": "2026-07-01T12:00:00Z"
+      },
+      "deployment": {
+        "onCentral": true,
+        "onExampleOasis": false
+      },
+      "projectKind": "plugin",
+      "registryVisible": true,
+      "metadataSource": "fixture",
+      "discoveryWarnings": ["Fixture warning"]
+    }
+  ]
+}

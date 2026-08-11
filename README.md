@@ -28,7 +28,8 @@ plugins = [
 
 ### Running the crawler
 
-To run the crawler you need to install the plugin with e.g. pip:
+To run the existing NOMAD upload crawler you need to install the plugin with
+e.g. pip:
 
 ```
 pip install nomad-plugins
@@ -71,6 +72,14 @@ Options:
   --upload-id TEXT       Optional upload ID for updating an existing upload.
   --help                 Show this message and exit.
 ```
+
+### Maintaining the registry crawler
+
+Maintainer notes for the crawler, public registry snapshot, and legacy NOMAD
+upload workflow are in
+[`docs/how_to/maintain_plugin_registry.md`](docs/how_to/maintain_plugin_registry.md).
+This file is intentionally linked only from the repository README and is not
+included in the public documentation navigation.
 
 
 ## Main contributors

@@ -2,8 +2,13 @@ import asyncio
 
 import click
 
-from nomad_plugins.crawler import *  # noqa: F403
-from nomad_plugins.nomad_upload import *  # noqa: F403
+from nomad_plugins.crawler import find_plugins
+from nomad_plugins.nomad_upload import (
+    get_upload_args,
+    trigger_processing,
+    upload_to_NOMAD,
+    wait_for_processing,
+)
 
 
 @click.command()
@@ -62,14 +67,14 @@ def main(github_token, nomad_url, nomad_username, nomad_password, upload_id):
                     upload_id: <upload-id>
 
     """
-    nomad_upload_info = get_upload_args(  # noqa: F405
+    nomad_upload_info = get_upload_args(
         nomad_url=nomad_url,
         nomad_username=nomad_username,
         nomad_password=nomad_password,
         upload_id=upload_id,
     )
-    plugins = asyncio.run(find_plugins(github_token))  # noqa: F405
-    upload_id = upload_to_NOMAD(  # noqa: F405
+    plugins = asyncio.run(find_plugins(github_token))
+    upload_id = upload_to_NOMAD(
         nomad_upload_info=nomad_upload_info,
         plugins=plugins,
     )
@@ -78,11 +83,11 @@ def main(github_token, nomad_url, nomad_username, nomad_password, upload_id):
     click.echo(
         f'Waiting for processing of upload {nomad_upload_info.upload_id} to complete...'
     )
-    if wait_for_processing(nomad_upload_info, timeout=1800):  # noqa: F405
+    if wait_for_processing(nomad_upload_info, timeout=1800):
         click.echo(
             f'First processing of upload {nomad_upload_info.upload_id} is complete.'
         )
-        if trigger_processing(nomad_upload_info):  # noqa: F405
+        if trigger_processing(nomad_upload_info):
             click.echo(
                 f'Second processing of upload {nomad_upload_info.upload_id} '
                 'has been triggered.'

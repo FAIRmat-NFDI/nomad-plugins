@@ -6,11 +6,8 @@ from pathlib import Path
 from typing import Any
 
 import click
-from pydantic import TypeAdapter
 
 from nomad_plugins.crawler import PluginData, find_plugins
-
-_PLUGIN_DATA_LIST_ADAPTER = TypeAdapter(list[PluginData])
 
 
 def _plugin_sort_key(plugin: PluginData) -> tuple[str, str]:
@@ -26,21 +23,17 @@ def _plugin_reference_sort_key(reference: dict[str, Any]) -> tuple[str, str]:
 
 def serialize_crawler_result(plugins: list[PluginData]) -> str:
     """Serialize the current crawler model to deterministic JSON."""
-    validated_plugins = _PLUGIN_DATA_LIST_ADAPTER.validate_python(plugins)
-    sorted_plugins = sorted(validated_plugins, key=_plugin_sort_key)
-    data = _PLUGIN_DATA_LIST_ADAPTER.dump_python(
-        sorted_plugins,
-        mode='json',
-        exclude_none=True,
-    )
-    for plugin in data:
-        plugin_data = plugin.get('data', {})
+    data = []
+    for plugin in sorted(plugins, key=_plugin_sort_key):
+        dumped_plugin = plugin.model_dump(mode='json', exclude_none=True)
+        plugin_data = dumped_plugin['data']
         plugin_dependencies = plugin_data.get('plugin_dependencies')
         if plugin_dependencies:
             plugin_data['plugin_dependencies'] = sorted(
                 plugin_dependencies,
                 key=_plugin_reference_sort_key,
             )
+        data.append(dumped_plugin)
     return json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + '\n'
 
 

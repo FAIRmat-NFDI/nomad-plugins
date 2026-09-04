@@ -237,7 +237,6 @@ class URLs(BaseModel):
 
 
 class NomadPlugin(BaseModel):
-    m_def: str = 'nomad_plugins.schema_packages.plugin.PluginEntryPoint'
     name: str
     module: str
     type: str | None
@@ -303,13 +302,11 @@ class PyProjectTOML(BaseModel):
 
 
 class PluginReference(BaseModel):
-    m_def: str = 'nomad_plugins.schema_packages.plugin.PluginReference'
     name: str
     location: str
 
 
 class Plugin(BaseModel):
-    m_def: str = 'nomad_plugins.schema_packages.plugin.Plugin'
     repository: HttpUrl
     stars: int
     created: str
@@ -327,10 +324,6 @@ class Plugin(BaseModel):
     on_example_oasis: bool
     on_pypi: bool
     plugin_entry_points: list[NomadPlugin] | None = None
-
-
-class PluginData(BaseModel):
-    data: Plugin
 
 
 class OasisURLs(Enum):
@@ -562,7 +555,7 @@ async def fetch_all_results_parallel_async(
 
 async def find_plugins(
     token: str,
-) -> list[PluginData]:
+) -> list[Plugin]:
     """
     Find and retrieve Nomad plugins from GitHub repositories.
     This function searches for repositories containing Nomad plugins by querying
@@ -609,7 +602,7 @@ async def find_plugins(
                 plugins[plugin.name] = plugin
             bar.update(1)
 
-    data: list[PluginData] = []
+    data: list[Plugin] = []
 
     # Add nomad related dependencies to the plugin dependency list
     for plugin in plugins.values():
@@ -623,6 +616,6 @@ async def find_plugins(
                 )
                 nomad_related_deps.append(PluginReference(name=dep, location=location))
         plugin.plugin_dependencies = nomad_related_deps
-        data.append(PluginData(data=plugin))
+        data.append(plugin)
 
     return data

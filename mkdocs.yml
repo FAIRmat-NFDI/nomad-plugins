@@ -1,5 +1,5 @@
 site_name: nomad-plugins
-site_description: A plugin for discovering other plugins.
+site_description: A standalone catalogue generator for NOMAD plugins.
 site_author: Hampus Näsström
 
 repo_url: https://github.com/hampusnasstrom/nomad-plugins
@@ -9,9 +9,9 @@ nav:
   - Home: index.md
   - Tutorial: tutorial/tutorial.md
   - How-to guides:
-      - Install this Plugin: how_to/install_this_plugin.md
-      - Use this Plugin: how_to/use_this_plugin.md
-      - Contribute to this plugin: how_to/contribute_to_this_plugin.md
+      - Install the catalogue generator: how_to/install_this_plugin.md
+      - Use the catalogue generator: how_to/use_this_plugin.md
+      - Contribute to this project: how_to/contribute_to_this_plugin.md
       - Contribute to the documentation: how_to/contribute_to_the_documentation.md
   - Explanation: explanation/explanation.md
   - Reference: reference/references.md
@@ -50,7 +50,7 @@ markdown_extensions:
   - pymdownx.extra
 extra:
   generator: false
-  homepage: https://nomad-lab.eu
+  homepage: https://github.com/hampusnasstrom/nomad-plugins
 use_directory_urls: false
 extra_css:
   - stylesheets/extra.css

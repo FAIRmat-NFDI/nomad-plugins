@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 from click.testing import CliRunner
 
 from nomad_plugins.cli import main
-from nomad_plugins.crawler import NomadPlugin, Plugin, PluginData, PluginReference
+from nomad_plugins.crawler import NomadPlugin, Plugin, PluginReference
 
 
 def _plugin(
@@ -12,24 +12,22 @@ def _plugin(
     *,
     plugin_dependencies: list[PluginReference] | None = None,
     plugin_entry_points: list[NomadPlugin] | None = None,
-) -> PluginData:
-    return PluginData(
-        data=Plugin(
-            repository=f'https://github.com/example/{name}',
-            stars=1,
-            created='2024-01-01T00:00:00Z',
-            last_updated='2024-01-02T00:00:00Z',
-            owner='example',
-            name=name,
-            description=None,
-            plugin_dependencies=plugin_dependencies or [],
-            authors=[],
-            maintainers=[],
-            on_central=False,
-            on_example_oasis=False,
-            on_pypi=True,
-            plugin_entry_points=plugin_entry_points or [],
-        )
+) -> Plugin:
+    return Plugin(
+        repository=f'https://github.com/example/{name}',
+        stars=1,
+        created='2024-01-01T00:00:00Z',
+        last_updated='2024-01-02T00:00:00Z',
+        owner='example',
+        name=name,
+        description=None,
+        plugin_dependencies=plugin_dependencies or [],
+        authors=[],
+        maintainers=[],
+        on_central=False,
+        on_example_oasis=False,
+        on_pypi=True,
+        plugin_entry_points=plugin_entry_points or [],
     )
 
 
@@ -73,17 +71,15 @@ def test_crawl_writes_deterministic_current_model_json(tmp_path):
     assert output.read_text(encoding='utf-8').endswith('\n')
 
     data = json.loads(output.read_text(encoding='utf-8'))
-    assert [plugin['data']['name'] for plugin in data] == [
+    assert [plugin['name'] for plugin in data] == [
         'alpha-plugin',
         'zeta-plugin',
     ]
-    assert [
-        dependency['name'] for dependency in data[1]['data']['plugin_dependencies']
-    ] == [
+    assert [dependency['name'] for dependency in data[1]['plugin_dependencies']] == [
         'alpha-dependency',
         'zeta-dependency',
     ]
-    assert 'type' not in data[1]['data']['plugin_entry_points'][0]
+    assert 'type' not in data[1]['plugin_entry_points'][0]
 
 
 def test_crawl_fails_without_replacing_existing_output_for_invalid_results(tmp_path):

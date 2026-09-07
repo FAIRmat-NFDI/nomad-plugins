@@ -7,11 +7,11 @@ from typing import Any
 
 import click
 
-from nomad_plugins.crawler import PluginData, find_plugins
+from nomad_plugins.crawler import Plugin, find_plugins
 
 
-def _plugin_sort_key(plugin: PluginData) -> tuple[str, str]:
-    return (plugin.data.name.casefold(), str(plugin.data.repository))
+def _plugin_sort_key(plugin: Plugin) -> tuple[str, str]:
+    return (plugin.name.casefold(), str(plugin.repository))
 
 
 def _plugin_reference_sort_key(reference: dict[str, Any]) -> tuple[str, str]:
@@ -21,23 +21,22 @@ def _plugin_reference_sort_key(reference: dict[str, Any]) -> tuple[str, str]:
     )
 
 
-def serialize_crawler_result(plugins: list[PluginData]) -> str:
+def serialize_crawler_result(plugins: list[Plugin]) -> str:
     """Serialize the current crawler model to deterministic JSON."""
     data = []
     for plugin in sorted(plugins, key=_plugin_sort_key):
-        dumped_plugin = plugin.model_dump(mode='json', exclude_none=True)
-        plugin_data = dumped_plugin['data']
+        plugin_data = plugin.model_dump(mode='json', exclude_none=True)
         plugin_dependencies = plugin_data.get('plugin_dependencies')
         if plugin_dependencies:
             plugin_data['plugin_dependencies'] = sorted(
                 plugin_dependencies,
                 key=_plugin_reference_sort_key,
             )
-        data.append(dumped_plugin)
+        data.append(plugin_data)
     return json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + '\n'
 
 
-def write_crawler_result(plugins: list[PluginData], output: Path) -> None:
+def write_crawler_result(plugins: list[Plugin], output: Path) -> None:
     """Write crawler JSON atomically, leaving no partial output on failure."""
     content = serialize_crawler_result(plugins)
     output.parent.mkdir(parents=True, exist_ok=True)

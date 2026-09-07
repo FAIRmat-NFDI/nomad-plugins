@@ -5,71 +5,34 @@
 
 # NOMAD Plugins
 
-A plugin for discovering other plugins.
+A standalone catalogue generator for discovering NOMAD plugins.
 
-## Using this plugin
+## Using the catalogue generator
 
-If you want to view the compiled list of NOMAD plugins indexed by this plugin you can
-find these on
-[nomad-lab.eu/prod/v1/oasis/gui/search/plugins](https://nomad-lab.eu/prod/v1/oasis/gui/search/plugins).
-
-### Installing the plugin
-
-If you want to add this plugin to your own oasis you need to add it to the plugins list
-in the `pyproject.toml` of your
-[NOMAD Oasis distribution repository](https://github.com/FAIRmat-NFDI/nomad-distro-template):
-
-```toml
-[project.optional-dependencies]
-plugins = [
-  "nomad-plugins"
-]
-```
+The `plugin-catalogue` CLI crawls public GitHub repositories for Python packages
+that expose NOMAD plugin entry points and writes the discovered metadata as JSON.
 
 ### Running the crawler
 
-To run the crawler you need to install the plugin with e.g. pip:
+Install the package with e.g. pip:
 
 ```
 pip install nomad-plugins
 ```
 
-and run the `plugin-crawler` script:
+and run the crawler export:
 
 ```
-Usage: plugin-crawler [OPTIONS]
+Usage: plugin-catalogue crawl [OPTIONS]
 
-  Crawl GitHub repositories for NOMAD plugins and upload them to the NOMAD
-  server.
-
-  The nomad-url can be provided as an argument or in the nomad.yaml config
-  file as:
-
-  client:
-
-      url: <nomad-url>
-
-  The upload-id can be provided as an argument or in the nomad.yaml config
-  file as:
-
-  plugins:
-
-      entry_points:
-
-          options:
-
-              nomad_plugins.apps:plugin_app_entry_point:
-              upload_id: <upload-id>
+  Crawl plugin metadata and write the current crawler result as JSON.
 
 Options:
-  --github-token TEXT    Your GitHub personal access token to use when
-                         querying for plugins.
-  --nomad-username TEXT  NOMAD username for the owner of the plugins upload.
-  --nomad-password TEXT  NOMAD password for the owner of the plugins upload.
-  --nomad-url TEXT       The NOMAD API URL, defaults to client.url in
-                         nomad.yaml.
-  --upload-id TEXT       Optional upload ID for updating an existing upload.
-  --help                 Show this message and exit.
+  --github-token TEXT  Your GitHub personal access token to use when querying
+                       for plugins.
+  --output FILE        Path where the crawler JSON result should be written.
+                       [required]
+  --help               Show this message and exit.
 ```
 
 

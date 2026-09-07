@@ -1,10 +1,12 @@
-# How to Use This Plugin
+# Use the Catalogue Generator
 
-This plugin can be used in a NOMAD Oasis installation.
+The catalogue generator crawls public GitHub repositories for Python packages that
+expose NOMAD plugin entry points and writes the discovered metadata as JSON.
 
-## Add This Plugin to Your NOMAD installation
+## Export crawler results
 
-Read the [NOMAD plugin documentation](https://nomad-lab.eu/prod/v1/staging/docs/plugins/plugins.html#add-a-plugin-to-your-nomad) for all details on how to deploy the plugin on your NOMAD instance.
+Run the crawler with a GitHub token and an output path:
 
-!!! note "Attention"
-    TODO
+```sh
+plugin-catalogue crawl --github-token <token> --output plugins.json
+```

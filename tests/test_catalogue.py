@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from nomad_plugins.catalogue import (
+    SCHEMA_VERSION,
     CatalogueSnapshot,
     CatalogueSourceSummary,
     build_catalogue_snapshot,
@@ -77,6 +78,7 @@ def test_build_catalogue_snapshot_sorts_plugins_and_dependencies():
 def test_catalogue_snapshot_rejects_duplicate_plugin_identities():
     with pytest.raises(ValidationError, match='Duplicate plugin identities'):
         CatalogueSnapshot(
+            schema_version=SCHEMA_VERSION,
             source_summary=CatalogueSourceSummary(plugin_count=2),
             plugins=[
                 _plugin('alpha-plugin'),
@@ -91,6 +93,7 @@ def test_catalogue_snapshot_rejects_duplicate_plugin_identities():
 def test_catalogue_snapshot_rejects_source_summary_count_mismatch():
     with pytest.raises(ValidationError, match='sourceSummary.pluginCount'):
         CatalogueSnapshot(
+            schema_version=SCHEMA_VERSION,
             source_summary=CatalogueSourceSummary(plugin_count=2),
             plugins=[_plugin('alpha-plugin')],
         )
@@ -108,12 +111,36 @@ def test_catalogue_snapshot_rejects_invalid_timestamp():
         )
 
 
+def test_catalogue_snapshot_requires_schema_version():
+    with pytest.raises(ValidationError, match='schemaVersion'):
+        CatalogueSnapshot.model_validate(
+            {
+                'sourceSummary': {'pluginCount': 0},
+                'plugins': [],
+            }
+        )
+
+
+def test_catalogue_snapshot_rejects_unsupported_schema_version():
+    with pytest.raises(ValidationError, match='schemaVersion'):
+        CatalogueSnapshot.model_validate(
+            {
+                'schemaVersion': '1.0.1',
+                'sourceSummary': {'pluginCount': 0},
+                'plugins': [],
+            }
+        )
+
+
 def test_catalogue_schema_file_is_current():
-    current_schema = json.dumps(
-        CatalogueSnapshot.model_json_schema(),
-        ensure_ascii=False,
-        indent=2,
-        sort_keys=True,
-    ) + '\n'
+    current_schema = (
+        json.dumps(
+            CatalogueSnapshot.model_json_schema(),
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        + '\n'
+    )
 
     assert SCHEMA_PATH.read_text(encoding='utf-8') == current_schema

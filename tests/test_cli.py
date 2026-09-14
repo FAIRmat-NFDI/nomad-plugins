@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, patch
 
 from click.testing import CliRunner
 
+from nomad_plugins.catalogue import CatalogueSnapshot
 from nomad_plugins.cli import main
 from nomad_plugins.crawler import NomadPlugin, Plugin, PluginReference
 
@@ -70,7 +71,9 @@ def test_crawl_writes_deterministic_catalogue_snapshot_json(tmp_path):
     find_plugins.assert_awaited_once_with('github-token')
     assert output.read_text(encoding='utf-8').endswith('\n')
 
-    data = json.loads(output.read_text(encoding='utf-8'))
+    output_text = output.read_text(encoding='utf-8')
+    CatalogueSnapshot.model_validate_json(output_text)
+    data = json.loads(output_text)
     assert data['schemaVersion'] == '1.0.0'
     assert data['sourceSummary'] == {'pluginCount': 2}
     assert [plugin['name'] for plugin in data['plugins']] == [
@@ -78,8 +81,7 @@ def test_crawl_writes_deterministic_catalogue_snapshot_json(tmp_path):
         'zeta-plugin',
     ]
     assert [
-        dependency['name']
-        for dependency in data['plugins'][1]['plugin_dependencies']
+        dependency['name'] for dependency in data['plugins'][1]['plugin_dependencies']
     ] == ['alpha-dependency', 'zeta-dependency']
     assert 'type' not in data['plugins'][1]['plugin_entry_points'][0]
 

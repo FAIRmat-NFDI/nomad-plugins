@@ -240,7 +240,7 @@ class URLs(BaseModel):
 class NomadPlugin(BaseModel):
     name: str
     module: str
-    type: str | None
+    type: str | None = None
 
 
 class EntryPoints(BaseModel):

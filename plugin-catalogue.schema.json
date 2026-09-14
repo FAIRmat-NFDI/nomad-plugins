@@ -63,13 +63,13 @@
               "type": "null"
             }
           ],
+          "default": null,
           "title": "Type"
         }
       },
       "required": [
         "name",
-        "module",
-        "type"
+        "module"
       ],
       "title": "NomadPlugin",
       "type": "object"
@@ -223,7 +223,6 @@
     },
     "schemaVersion": {
       "const": "1.0.0",
-      "default": "1.0.0",
       "title": "Schemaversion",
       "type": "string"
     },
@@ -232,6 +231,7 @@
     }
   },
   "required": [
+    "schemaVersion",
     "sourceSummary",
     "plugins"
   ],

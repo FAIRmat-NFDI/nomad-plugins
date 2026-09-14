@@ -26,7 +26,6 @@ class CatalogueSnapshot(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     schema_version: Literal[SCHEMA_VERSION] = Field(
-        default=SCHEMA_VERSION,
         alias='schemaVersion',
     )
     data_updated_at: datetime | None = Field(default=None, alias='dataUpdatedAt')
@@ -70,6 +69,7 @@ def build_catalogue_snapshot(
         for plugin in sorted(plugins, key=_plugin_sort_key)
     ]
     return CatalogueSnapshot(
+        schema_version=SCHEMA_VERSION,
         data_updated_at=data_updated_at,
         source_summary=CatalogueSourceSummary(plugin_count=len(sorted_plugins)),
         plugins=sorted_plugins,

@@ -10,6 +10,7 @@ import httpx
 import toml
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, HttpUrl, TypeAdapter, model_validator
+from pydantic.json_schema import SkipJsonSchema
 
 # Load .env file if it exists
 env_path = Path('.env')
@@ -239,7 +240,7 @@ class URLs(BaseModel):
 class NomadPlugin(BaseModel):
     name: str
     module: str
-    type: str | None
+    type: str | None = None
 
 
 class EntryPoints(BaseModel):
@@ -314,8 +315,10 @@ class Plugin(BaseModel):
     owner: str
     name: str
     description: str | None = None
-    all_dependencies: set[str] = Field(
-        set(), description='Placeholder field to store all dependencies', exclude=True
+    all_dependencies: SkipJsonSchema[set[str]] = Field(
+        default_factory=set,
+        description='Placeholder field to store all dependencies',
+        exclude=True,
     )
     plugin_dependencies: list[PluginReference] = []
     authors: list[Author] = []

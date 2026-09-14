@@ -3,7 +3,7 @@
 The catalogue generator crawls public GitHub repositories for Python packages that
 expose NOMAD plugin entry points and writes the discovered metadata as JSON.
 
-## Export crawler results
+## Export a catalogue snapshot
 
 Run the crawler with a GitHub token and an output path:
 

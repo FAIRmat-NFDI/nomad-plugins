@@ -25,12 +25,12 @@ and run the crawler export:
 ```
 Usage: plugin-catalogue crawl [OPTIONS]
 
-  Crawl plugin metadata and write the current crawler result as JSON.
+  Crawl plugin metadata and write a catalogue snapshot as JSON.
 
 Options:
   --github-token TEXT  Your GitHub personal access token to use when querying
                        for plugins.
-  --output FILE        Path where the crawler JSON result should be written.
+  --output FILE        Path where the catalogue snapshot JSON should be written.
                        [required]
   --help               Show this message and exit.
 ```

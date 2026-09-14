@@ -1,0 +1,240 @@
+{
+  "$defs": {
+    "Author": {
+      "properties": {
+        "email": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Email"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        }
+      },
+      "title": "Author",
+      "type": "object"
+    },
+    "CatalogueSourceSummary": {
+      "properties": {
+        "pluginCount": {
+          "minimum": 0,
+          "title": "Plugincount",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "pluginCount"
+      ],
+      "title": "CatalogueSourceSummary",
+      "type": "object"
+    },
+    "NomadPlugin": {
+      "properties": {
+        "module": {
+          "title": "Module",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Type"
+        }
+      },
+      "required": [
+        "name",
+        "module",
+        "type"
+      ],
+      "title": "NomadPlugin",
+      "type": "object"
+    },
+    "Plugin": {
+      "properties": {
+        "authors": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Author"
+          },
+          "title": "Authors",
+          "type": "array"
+        },
+        "created": {
+          "title": "Created",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "last_updated": {
+          "title": "Last Updated",
+          "type": "string"
+        },
+        "maintainers": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Author"
+          },
+          "title": "Maintainers",
+          "type": "array"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "on_central": {
+          "title": "On Central",
+          "type": "boolean"
+        },
+        "on_example_oasis": {
+          "title": "On Example Oasis",
+          "type": "boolean"
+        },
+        "on_pypi": {
+          "title": "On Pypi",
+          "type": "boolean"
+        },
+        "owner": {
+          "title": "Owner",
+          "type": "string"
+        },
+        "plugin_dependencies": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PluginReference"
+          },
+          "title": "Plugin Dependencies",
+          "type": "array"
+        },
+        "plugin_entry_points": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/NomadPlugin"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plugin Entry Points"
+        },
+        "repository": {
+          "format": "uri",
+          "maxLength": 2083,
+          "minLength": 1,
+          "title": "Repository",
+          "type": "string"
+        },
+        "stars": {
+          "title": "Stars",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "repository",
+        "stars",
+        "created",
+        "last_updated",
+        "owner",
+        "name",
+        "on_central",
+        "on_example_oasis",
+        "on_pypi"
+      ],
+      "title": "Plugin",
+      "type": "object"
+    },
+    "PluginReference": {
+      "properties": {
+        "location": {
+          "title": "Location",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "location"
+      ],
+      "title": "PluginReference",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "dataUpdatedAt": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Dataupdatedat"
+    },
+    "plugins": {
+      "items": {
+        "$ref": "#/$defs/Plugin"
+      },
+      "title": "Plugins",
+      "type": "array"
+    },
+    "schemaVersion": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "sourceSummary": {
+      "$ref": "#/$defs/CatalogueSourceSummary"
+    }
+  },
+  "required": [
+    "sourceSummary",
+    "plugins"
+  ],
+  "title": "CatalogueSnapshot",
+  "type": "object"
+}

@@ -1,49 +1,29 @@
 import asyncio
 import math
-import re
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
 import click
 import httpx
-import toml
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, HttpUrl, TypeAdapter, model_validator
+from pydantic import BaseModel, Field, HttpUrl, TypeAdapter
 from pydantic.json_schema import SkipJsonSchema
+
+from nomad_plugins.pyproject import (
+    Author,
+    NomadPlugin,
+    PyProjectError,
+    PyProjectTOML,
+    parse_pyproject,
+    parse_requirement_name,
+    project_path_from_pyproject_path,
+)
 
 # Load .env file if it exists
 env_path = Path('.env')
 if env_path.exists():
     load_dotenv(env_path)
-
-
-def extract_dependency_name(dependency_string: str) -> str:
-    """Extracts the core dependency name from a dependency string,
-    removing version specifiers, comments, and git repository references.
-
-    Args:
-        dependency_string: A string representing a dependency, potentially
-                        including version specifiers, comments, or git
-                        repository references.
-
-    Returns:
-        The extracted dependency name, stripped of any extra information.
-    """
-    # Remove comments and markers (anything after # and ;)
-    dependency_string = dependency_string.split('#', 1)[0].strip()
-    dependency_string = dependency_string.split(';', 1)[0].strip()
-
-    # Remove version specifiers (e.g., >=1.2.3, ==2.0) using regex
-    dependency_string = re.sub(r'[<>=~!].*', '', dependency_string).strip()
-
-    # Remove git repository references (e.g., @ git+https://...) using regex
-    dependency_string = re.sub(r'\s*@\s*git\+.*', '', dependency_string).strip()
-
-    # Remove extras markers eg. "requests; extra == 'security'"
-    dependency_string = re.sub(r'\s*;\s*extra.*', '', dependency_string).strip()
-
-    return dependency_string
 
 
 class GitHubOwner(BaseModel):
@@ -222,86 +202,6 @@ class GitHubSearchResultItem(BaseModel):
     score: float
 
 
-class Author(BaseModel):
-    name: str | None = None
-    email: str | None = None
-
-
-class LicenseInfo(BaseModel):
-    file: str | None = None
-    text: str | None = None
-
-
-class URLs(BaseModel):
-    Homepage: HttpUrl | None = Field(None, alias='homepage')
-    Bug_Tracker: HttpUrl | None = Field(None, alias='bug_tracker')
-
-
-class NomadPlugin(BaseModel):
-    name: str
-    module: str
-    type: str | None = None
-
-
-class EntryPoints(BaseModel):
-    nomad_plugin: list[NomadPlugin] | None = None
-
-    @model_validator(mode='before')
-    @classmethod
-    def plugin_type(cls, values):
-        if nomad_plugins := values.pop('nomad.plugin', []):
-            result = []
-            for name, entry_point in nomad_plugins.items():
-                plugin_type = None
-                if 'schema' in entry_point or 'schema' in name:
-                    plugin_type = 'Schema package'
-                elif 'parser' in entry_point or 'parser' in name:
-                    plugin_type = 'Parser'
-                elif 'normalizer' in entry_point or 'normalizer' in name:
-                    plugin_type = 'Normalizer'
-                elif 'app' in entry_point or 'app' in name:
-                    plugin_type = 'App'
-                elif 'example' in entry_point or 'example' in name:
-                    plugin_type = 'Example upload'
-                elif 'api' in entry_point or 'api' in name:
-                    plugin_type = 'API'
-                result.append(
-                    NomadPlugin(name=name, module=entry_point, type=plugin_type)
-                )
-            values['nomad_plugin'] = result
-        return values
-
-
-class PyProjectTOML(BaseModel):
-    name: str
-    dynamic: list[str] | None = None
-    authors: list[Author] | None = None
-    maintainers: list[Author] | None = None
-    description: str | None = None
-    readme: str | None = None
-    license: LicenseInfo | None = None
-    requires_python: str | None = None
-    dependencies: list[str] | None = None
-    urls: URLs | None = None
-    optional_dependencies: dict[str, list[str]] | None = None
-    all_dependencies: set[str] | None = (
-        None  # this is a custom field that combines all of the deps (main and optional)
-    )
-    entry_points: EntryPoints | None = Field(None, alias='entry-points')
-
-    @model_validator(mode='before')
-    @classmethod
-    def deps(cls, values):
-        all_dependencies = [
-            extract_dependency_name(dep) for dep in values.get('dependencies', [])
-        ]
-        for _, deps in values.get('optional-dependencies', {}).items():
-            all_dependencies.extend([extract_dependency_name(dep) for dep in deps])
-
-        values['all_dependencies'] = all_dependencies
-        return values
-
-
 class PluginReference(BaseModel):
     name: str
     location: str
@@ -318,6 +218,21 @@ class Plugin(BaseModel):
     all_dependencies: SkipJsonSchema[set[str]] = Field(
         default_factory=set,
         description='Placeholder field to store all dependencies',
+        exclude=True,
+    )
+    project_path: SkipJsonSchema[str | None] = Field(default=None, exclude=True)
+    declared_repository_url: SkipJsonSchema[HttpUrl | None] = Field(
+        default=None,
+        exclude=True,
+    )
+    documentation_url: SkipJsonSchema[HttpUrl | None] = Field(
+        default=None,
+        exclude=True,
+    )
+    homepage_url: SkipJsonSchema[HttpUrl | None] = Field(default=None, exclude=True)
+    issues_url: SkipJsonSchema[HttpUrl | None] = Field(default=None, exclude=True)
+    parsing_warnings: SkipJsonSchema[list[str]] = Field(
+        default_factory=list,
         exclude=True,
     )
     plugin_dependencies: list[PluginReference] = []
@@ -362,13 +277,12 @@ async def fetch_nomad_deployment_requirements(
     """
     response = await fetch_page_async(requirements_url)
     if response:
-        return set(
-            [
-                # the first two lines are preamble by uv
-                extract_dependency_name(line)
-                for line in response.text.splitlines()[2:]
-            ]
-        )
+        return {
+            dependency_name
+            for line in response.text.splitlines()[2:]
+            if line.strip() and not line.lstrip().startswith('#')
+            if (dependency_name := parse_requirement_name(line)) is not None
+        }
     return set()
 
 
@@ -388,23 +302,26 @@ async def get_toml_project(
         dict: A dictionary containing the 'project' section of the `pyproject.toml` file
               if successful, otherwise an empty dictionary.
     """
-    repo_html_url = str(search_result.repository.html_url)
     commit_sha = str(search_result.url).split('ref=')[-1]
 
-    if 'pyproject.toml' not in search_result.path or not commit_sha:
+    try:
+        project_path_from_pyproject_path(search_result.path)
+    except PyProjectError:
         return None
 
-    # Ensure repo_html_url ends without trailing slash, we will use join to add paths.
-    repo_html_url = repo_html_url.rstrip('/')
+    if not commit_sha:
+        return None
 
     raw_url = f'https://raw.githubusercontent.com/{search_result.repository.full_name}/{commit_sha}/{search_result.path}'
 
     response = await fetch_page_async(url=raw_url)
     if response:
         try:
-            toml_content = toml.loads(response.text).get('project', {})
-            return PyProjectTOML.model_validate(toml_content)
-        except toml.TomlDecodeError as e:
+            return parse_pyproject(
+                response.text,
+                pyproject_path=search_result.path,
+            )
+        except PyProjectError as e:
             click.echo(f'Failed to parse pyproject.toml from {raw_url}: {e}')
     return None
 
@@ -472,6 +389,12 @@ async def get_plugin(
         owner=repo_info.owner.login,
         name=name,
         all_dependencies=all_dependencies,
+        project_path=project.project_path,
+        declared_repository_url=project.urls.repository,
+        documentation_url=project.urls.documentation,
+        homepage_url=project.urls.homepage,
+        issues_url=project.urls.issues,
+        parsing_warnings=project.parsing_warnings,
         description=project.description,
         authors=authors,
         maintainers=maintainers,

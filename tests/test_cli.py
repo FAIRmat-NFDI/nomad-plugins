@@ -5,7 +5,8 @@ from click.testing import CliRunner
 
 from nomad_plugins.catalogue import CatalogueSnapshot
 from nomad_plugins.cli import main
-from nomad_plugins.crawler import NomadPlugin, Plugin, PluginReference
+from nomad_plugins.crawler import Plugin, PluginReference
+from nomad_plugins.pyproject import NomadPlugin
 
 
 def _plugin(

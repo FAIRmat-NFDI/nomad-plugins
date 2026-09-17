@@ -1,50 +1,216 @@
 {
   "$defs": {
-    "Author": {
-      "properties": {
-        "email": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Email"
-        },
-        "name": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Name"
-        }
-      },
-      "title": "Author",
-      "type": "object"
-    },
     "CatalogueSourceSummary": {
       "properties": {
         "pluginCount": {
           "minimum": 0,
           "title": "Plugincount",
           "type": "integer"
+        },
+        "projectKindCounts": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "propertyNames": {
+            "enum": [
+              "plugin",
+              "nomad_dependent_package",
+              "distribution",
+              "official_template",
+              "official_software",
+              "template_or_example",
+              "ecosystem_package"
+            ]
+          },
+          "title": "Projectkindcounts",
+          "type": "object"
+        },
+        "registryVisibleCount": {
+          "minimum": 0,
+          "title": "Registryvisiblecount",
+          "type": "integer"
+        },
+        "warningCount": {
+          "minimum": 0,
+          "title": "Warningcount",
+          "type": "integer"
         }
       },
       "required": [
-        "pluginCount"
+        "pluginCount",
+        "registryVisibleCount",
+        "projectKindCounts",
+        "warningCount"
       ],
       "title": "CatalogueSourceSummary",
       "type": "object"
     },
-    "NomadPlugin": {
+    "DeploymentInfo": {
+      "properties": {
+        "onCentral": {
+          "title": "Oncentral",
+          "type": "boolean"
+        },
+        "onExampleOasis": {
+          "title": "Onexampleoasis",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "onCentral",
+        "onExampleOasis"
+      ],
+      "title": "DeploymentInfo",
+      "type": "object"
+    },
+    "Plugin": {
+      "properties": {
+        "dependencies": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Dependencies",
+          "type": "array"
+        },
+        "deployment": {
+          "$ref": "#/$defs/DeploymentInfo"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "discoveryWarnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Discoverywarnings",
+          "type": "array"
+        },
+        "documentationUrl": {
+          "anyOf": [
+            {
+              "format": "uri",
+              "maxLength": 2083,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Documentationurl"
+        },
+        "entrypoints": {
+          "items": {
+            "$ref": "#/$defs/PluginEntryPoint"
+          },
+          "title": "Entrypoints",
+          "type": "array"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "metadataSource": {
+          "const": "pyproject.toml",
+          "title": "Metadatasource",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "owner": {
+          "title": "Owner",
+          "type": "string"
+        },
+        "pluginTypes": {
+          "anyOf": [
+            {
+              "items": {
+                "enum": [
+                  "schema",
+                  "parser",
+                  "normalizer",
+                  "app",
+                  "example_upload",
+                  "api",
+                  "north_tool",
+                  "action",
+                  "dashboard",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plugintypes"
+        },
+        "projectKind": {
+          "enum": [
+            "plugin",
+            "nomad_dependent_package",
+            "distribution",
+            "official_template",
+            "official_software",
+            "template_or_example",
+            "ecosystem_package"
+          ],
+          "title": "Projectkind",
+          "type": "string"
+        },
+        "pypiUrl": {
+          "anyOf": [
+            {
+              "format": "uri",
+              "maxLength": 2083,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pypiurl"
+        },
+        "registryVisible": {
+          "title": "Registryvisible",
+          "type": "boolean"
+        },
+        "repositoryUrl": {
+          "format": "uri",
+          "maxLength": 2083,
+          "minLength": 1,
+          "title": "Repositoryurl",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/RepositoryStatus"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "repositoryUrl",
+        "owner",
+        "status",
+        "deployment",
+        "projectKind",
+        "registryVisible",
+        "metadataSource"
+      ],
+      "title": "Plugin",
+      "type": "object"
+    },
+    "PluginEntryPoint": {
       "properties": {
         "module": {
           "title": "Module",
@@ -55,42 +221,40 @@
           "type": "string"
         },
         "type": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
+          "enum": [
+            "schema",
+            "parser",
+            "normalizer",
+            "app",
+            "example_upload",
+            "api",
+            "north_tool",
+            "action",
+            "dashboard",
+            "unknown"
           ],
-          "default": null,
-          "title": "Type"
+          "title": "Type",
+          "type": "string"
         }
       },
       "required": [
         "name",
-        "module"
+        "module",
+        "type"
       ],
-      "title": "NomadPlugin",
+      "title": "PluginEntryPoint",
       "type": "object"
     },
-    "Plugin": {
+    "RepositoryStatus": {
       "properties": {
-        "authors": {
-          "default": [],
-          "items": {
-            "$ref": "#/$defs/Author"
-          },
-          "title": "Authors",
-          "type": "array"
+        "archived": {
+          "title": "Archived",
+          "type": "boolean"
         },
-        "created": {
-          "title": "Created",
-          "type": "string"
-        },
-        "description": {
+        "createdAt": {
           "anyOf": [
             {
+              "format": "date-time",
               "type": "string"
             },
             {
@@ -98,69 +262,24 @@
             }
           ],
           "default": null,
-          "title": "Description"
+          "title": "Createdat"
         },
-        "last_updated": {
-          "title": "Last Updated",
-          "type": "string"
-        },
-        "maintainers": {
-          "default": [],
-          "items": {
-            "$ref": "#/$defs/Author"
-          },
-          "title": "Maintainers",
-          "type": "array"
-        },
-        "name": {
-          "title": "Name",
-          "type": "string"
-        },
-        "on_central": {
-          "title": "On Central",
+        "fork": {
+          "title": "Fork",
           "type": "boolean"
         },
-        "on_example_oasis": {
-          "title": "On Example Oasis",
-          "type": "boolean"
-        },
-        "on_pypi": {
-          "title": "On Pypi",
-          "type": "boolean"
-        },
-        "owner": {
-          "title": "Owner",
-          "type": "string"
-        },
-        "plugin_dependencies": {
-          "default": [],
-          "items": {
-            "$ref": "#/$defs/PluginReference"
-          },
-          "title": "Plugin Dependencies",
-          "type": "array"
-        },
-        "plugin_entry_points": {
+        "lastPushedAt": {
           "anyOf": [
             {
-              "items": {
-                "$ref": "#/$defs/NomadPlugin"
-              },
-              "type": "array"
+              "format": "date-time",
+              "type": "string"
             },
             {
               "type": "null"
             }
           ],
           "default": null,
-          "title": "Plugin Entry Points"
-        },
-        "repository": {
-          "format": "uri",
-          "maxLength": 2083,
-          "minLength": 1,
-          "title": "Repository",
-          "type": "string"
+          "title": "Lastpushedat"
         },
         "stars": {
           "title": "Stars",
@@ -168,35 +287,11 @@
         }
       },
       "required": [
-        "repository",
-        "stars",
-        "created",
-        "last_updated",
-        "owner",
-        "name",
-        "on_central",
-        "on_example_oasis",
-        "on_pypi"
+        "archived",
+        "fork",
+        "stars"
       ],
-      "title": "Plugin",
-      "type": "object"
-    },
-    "PluginReference": {
-      "properties": {
-        "location": {
-          "title": "Location",
-          "type": "string"
-        },
-        "name": {
-          "title": "Name",
-          "type": "string"
-        }
-      },
-      "required": [
-        "name",
-        "location"
-      ],
-      "title": "PluginReference",
+      "title": "RepositoryStatus",
       "type": "object"
     }
   },
@@ -222,7 +317,7 @@
       "type": "array"
     },
     "schemaVersion": {
-      "const": "1.0.0",
+      "const": "2.0.0",
       "title": "Schemaversion",
       "type": "string"
     },

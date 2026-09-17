@@ -3,16 +3,17 @@ import os
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Final, Literal
+from typing import Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from nomad_plugins.crawler import Plugin
+from nomad_plugins.transform import ProjectKind
 
 # Schema versioning is independent of the package version.
 # MAJOR: breaking JSON contract changes; MINOR: compatible additions;
 # PATCH: schema/documentation fixes that do not change valid JSON instances.
-SCHEMA_VERSION: Final = '1.0.0'
+SCHEMA_VERSION: Final = '2.0.0'
 DEFAULT_SCHEMA_PATH = Path('plugin-catalogue.schema.json')
 
 
@@ -20,6 +21,9 @@ class CatalogueSourceSummary(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     plugin_count: int = Field(alias='pluginCount', ge=0)
+    registry_visible_count: int = Field(alias='registryVisibleCount', ge=0)
+    project_kind_counts: dict[ProjectKind, int] = Field(alias='projectKindCounts')
+    warning_count: int = Field(alias='warningCount', ge=0)
 
 
 class CatalogueSnapshot(BaseModel):
@@ -39,21 +43,40 @@ class CatalogueSnapshot(BaseModel):
                 'sourceSummary.pluginCount must match the number of plugins.'
             )
 
-        seen: set[tuple[str, str]] = set()
-        duplicates: set[tuple[str, str]] = set()
-        for plugin in self.plugins:
-            identity = (
-                plugin.name.casefold(),
-                str(plugin.repository).rstrip('/').casefold(),
+        registry_visible_count = sum(plugin.registry_visible for plugin in self.plugins)
+        if self.source_summary.registry_visible_count != registry_visible_count:
+            raise ValueError(
+                'sourceSummary.registryVisibleCount must match the number of '
+                'registry-visible plugins.'
             )
+
+        project_kind_counts: dict[ProjectKind, int] = {}
+        for plugin in self.plugins:
+            project_kind_counts[plugin.project_kind] = (
+                project_kind_counts.get(plugin.project_kind, 0) + 1
+            )
+        if self.source_summary.project_kind_counts != project_kind_counts:
+            raise ValueError(
+                'sourceSummary.projectKindCounts must match the plugin project kinds.'
+            )
+
+        warning_count = sum(len(plugin.discovery_warnings) for plugin in self.plugins)
+        if self.source_summary.warning_count != warning_count:
+            raise ValueError(
+                'sourceSummary.warningCount must match the number of discovery '
+                'warnings.'
+            )
+
+        seen: set[str] = set()
+        duplicates: set[str] = set()
+        for plugin in self.plugins:
+            identity = plugin.id.casefold()
             if identity in seen:
                 duplicates.add(identity)
             seen.add(identity)
 
         if duplicates:
-            duplicate_list = ', '.join(
-                f'{name} ({repository})' for name, repository in sorted(duplicates)
-            )
+            duplicate_list = ', '.join(sorted(duplicates))
             raise ValueError(f'Duplicate plugin identities found: {duplicate_list}.')
 
         return self
@@ -64,14 +87,26 @@ def build_catalogue_snapshot(
     *,
     data_updated_at: datetime | None = None,
 ) -> CatalogueSnapshot:
-    sorted_plugins = [
-        _sort_plugin_dependencies(plugin)
-        for plugin in sorted(plugins, key=_plugin_sort_key)
-    ]
+    sorted_plugins = [_normalize_plugin(plugin) for plugin in plugins]
+    sorted_plugins.sort(key=_plugin_sort_key)
+    project_kind_counts: dict[ProjectKind, int] = {}
+    for plugin in sorted_plugins:
+        project_kind_counts[plugin.project_kind] = (
+            project_kind_counts.get(plugin.project_kind, 0) + 1
+        )
     return CatalogueSnapshot(
         schema_version=SCHEMA_VERSION,
         data_updated_at=data_updated_at,
-        source_summary=CatalogueSourceSummary(plugin_count=len(sorted_plugins)),
+        source_summary=CatalogueSourceSummary(
+            plugin_count=len(sorted_plugins),
+            registry_visible_count=sum(
+                plugin.registry_visible for plugin in sorted_plugins
+            ),
+            project_kind_counts=project_kind_counts,
+            warning_count=sum(
+                len(plugin.discovery_warnings) for plugin in sorted_plugins
+            ),
+        ),
         plugins=sorted_plugins,
     )
 
@@ -115,19 +150,29 @@ def write_catalogue_schema(output: Path = DEFAULT_SCHEMA_PATH) -> None:
 
 
 def _plugin_sort_key(plugin: Plugin) -> tuple[str, str]:
-    return (plugin.name.casefold(), str(plugin.repository))
+    return (plugin.name.casefold(), plugin.id)
 
 
-def _plugin_reference_sort_key(reference: Any) -> tuple[str, str]:
-    return (reference.name.casefold(), reference.location)
-
-
-def _sort_plugin_dependencies(plugin: Plugin) -> Plugin:
+def _normalize_plugin(plugin: Plugin) -> Plugin:
     return plugin.model_copy(
         update={
-            'plugin_dependencies': sorted(
-                plugin.plugin_dependencies,
-                key=_plugin_reference_sort_key,
+            'entrypoints': sorted(
+                plugin.entrypoints,
+                key=lambda entrypoint: (
+                    entrypoint.type,
+                    entrypoint.name.casefold(),
+                    entrypoint.module.casefold(),
+                ),
             )
+            if plugin.entrypoints
+            else [],
+            'plugin_types': sorted(plugin.plugin_types)
+            if plugin.plugin_types is not None
+            else None,
+            'dependencies': sorted(set(plugin.dependencies), key=str.casefold),
+            'discovery_warnings': sorted(
+                set(plugin.discovery_warnings),
+                key=str.casefold,
+            ),
         },
     )

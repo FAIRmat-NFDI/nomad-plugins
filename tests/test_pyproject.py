@@ -1,5 +1,6 @@
 import asyncio
 import warnings
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -59,8 +60,8 @@ homepage = "https://example.com/plugin"
         'example.parser',
         'special.extension',
     ]
-    assert project.entry_points.nomad_plugin[0].type == 'Parser'
-    assert project.entry_points.nomad_plugin[1].type is None
+    assert project.entry_points.nomad_plugin[0].type == 'parser'
+    assert project.entry_points.nomad_plugin[1].type == 'unknown'
     assert project.parsing_warnings == [
         'Retained unclassified nomad.plugin entry point: special.extension'
     ]
@@ -99,7 +100,7 @@ valid = "custom.extension:entry_point"
 
     assert project.all_dependencies == {'valid'}
     assert [entry.name for entry in project.entry_points.nomad_plugin] == ['valid']
-    assert project.entry_points.nomad_plugin[0].type is None
+    assert project.entry_points.nomad_plugin[0].type == 'unknown'
     assert [str(warning.message) for warning in emitted_warnings] == [
         'Skipped invalid dependency requirement: not a valid requirement ???',
         'Skipped malformed nomad.plugin entry point.',
@@ -175,20 +176,27 @@ name = "example-plugin"
     assert project.project_path == 'packages/example'
 
 
-def test_crawler_retains_source_metadata_without_changing_public_output():
-    project = parse_pyproject(
-        """
+def test_crawler_builds_public_contract_and_retains_internal_source_metadata():
+    with pytest.warns(PyProjectWarning, match='Retained unclassified'):
+        project = parse_pyproject(
+            """
 [project]
 name = "example-parser"
+description = "Example parser"
+dependencies = ["NOMAD_lab>=1", "Helper_Plugin"]
 
 [project.urls]
 Repository = "https://github.com/example/declared"
 Documentation = "https://docs.example.com/parser"
 Homepage = "https://example.com/parser"
 Issues = "https://github.com/example/declared/issues"
+
+[project.entry-points."nomad.plugin"]
+example_parser = "example.parsers:parser_entry_point"
+"special.extension" = "custom.extension:entry_point"
 """,
-        pyproject_path='packages/parser/pyproject.toml',
-    )
+            pyproject_path='packages/parser/pyproject.toml',
+        )
     item = SimpleNamespace(
         repository=SimpleNamespace(
             url='https://api.github.test/repos/example/discovered',
@@ -201,6 +209,9 @@ Issues = "https://github.com/example/declared/issues"
         stargazers_count=5,
         created_at='2024-01-01T00:00:00Z',
         updated_at='2024-01-02T00:00:00Z',
+        pushed_at='2024-01-03T00:00:00Z',
+        archived=False,
+        fork=False,
     )
 
     with (
@@ -231,7 +242,8 @@ Issues = "https://github.com/example/declared/issues"
         )
 
     assert plugin is not None
-    assert str(plugin.repository) == 'https://github.com/example/discovered'
+    assert plugin.id == 'github.com/example/discovered#packages/parser'
+    assert str(plugin.repository_url) == 'https://github.com/example/discovered'
     assert plugin.project_path == 'packages/parser'
     assert str(plugin.declared_repository_url) == (
         'https://github.com/example/declared'
@@ -239,13 +251,27 @@ Issues = "https://github.com/example/declared/issues"
     assert str(plugin.documentation_url) == 'https://docs.example.com/parser'
     assert str(plugin.homepage_url) == 'https://example.com/parser'
     assert str(plugin.issues_url) == 'https://github.com/example/declared/issues'
+    assert plugin.plugin_types == ['parser', 'unknown']
+    assert plugin.dependencies == ['helper-plugin', 'nomad-lab']
+    assert plugin.project_kind == 'plugin'
+    assert plugin.registry_visible is True
+    assert plugin.status.last_pushed_at == datetime.fromisoformat(
+        '2024-01-03T00:00:00+00:00'
+    )
 
-    public_data = plugin.model_dump(mode='json', exclude_none=True)
+    public_data = plugin.model_dump(mode='json', by_alias=True, exclude_none=True)
+    assert public_data['repositoryUrl'] == 'https://github.com/example/discovered'
+    assert public_data['documentationUrl'] == 'https://docs.example.com/parser'
+    assert public_data['pypiUrl'] == 'https://pypi.org/project/example-parser/'
+    assert public_data['pluginTypes'] == ['parser', 'unknown']
+    assert public_data['discoveryWarnings'] == [
+        'Retained unclassified nomad.plugin entry point: special.extension'
+    ]
     assert {
         'project_path',
         'declared_repository_url',
-        'documentation_url',
         'homepage_url',
         'issues_url',
-        'parsing_warnings',
+        'authors',
+        'maintainers',
     }.isdisjoint(public_data)

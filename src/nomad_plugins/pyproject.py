@@ -11,7 +11,20 @@ except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.10
     import tomli as tomllib
 
 from packaging.requirements import InvalidRequirement, Requirement
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    ValidationError,
+    field_validator,
+)
+
+from nomad_plugins.transform import (
+    PluginType,
+    infer_entrypoint_type,
+    normalize_plugin_type,
+)
 
 PYPROJECT_FILENAME = 'pyproject.toml'
 NOMAD_ENTRY_POINT_GROUP = 'nomad.plugin'
@@ -42,14 +55,19 @@ class ProjectURLs(BaseModel):
     issues: HttpUrl | None = None
 
 
-class NomadPlugin(BaseModel):
+class PluginEntryPoint(BaseModel):
     name: str
     module: str
-    type: str | None = None
+    type: PluginType
+
+    @field_validator('type', mode='before')
+    @classmethod
+    def normalize_type(cls, value: str) -> PluginType:
+        return normalize_plugin_type(value)
 
 
 class EntryPoints(BaseModel):
-    nomad_plugin: list[NomadPlugin] = Field(default_factory=list)
+    nomad_plugin: list[PluginEntryPoint] = Field(default_factory=list)
 
 
 class PyProjectTOML(BaseModel):
@@ -189,7 +207,7 @@ def _parse_entry_points(
         )
         return EntryPoints()
 
-    plugins: list[NomadPlugin] = []
+    plugins: list[PluginEntryPoint] = []
     for name, module in sorted(nomad_entry_points.items()):
         if not isinstance(name, str) or not isinstance(module, str):
             _record_warning(diagnostics, 'Skipped malformed nomad.plugin entry point.')
@@ -201,14 +219,14 @@ def _parse_entry_points(
             _record_warning(diagnostics, 'Skipped empty nomad.plugin entry point.')
             continue
 
-        plugin_type = _infer_legacy_plugin_type(cleaned_name, cleaned_module)
-        if plugin_type is None:
+        plugin_type = infer_entrypoint_type(cleaned_name, cleaned_module)
+        if plugin_type == 'unknown':
             _record_warning(
                 diagnostics,
                 f'Retained unclassified nomad.plugin entry point: {cleaned_name}',
             )
         plugins.append(
-            NomadPlugin(
+            PluginEntryPoint(
                 name=cleaned_name,
                 module=cleaned_module,
                 type=plugin_type,
@@ -216,22 +234,6 @@ def _parse_entry_points(
         )
 
     return EntryPoints(nomad_plugin=plugins)
-
-
-def _infer_legacy_plugin_type(name: str, module: str) -> str | None:
-    searchable_text = f'{name} {module}'.casefold()
-    type_hints = (
-        ('schema', 'Schema package'),
-        ('parser', 'Parser'),
-        ('normalizer', 'Normalizer'),
-        ('app', 'App'),
-        ('example', 'Example upload'),
-        ('api', 'API'),
-    )
-    for hint, plugin_type in type_hints:
-        if hint in searchable_text:
-            return plugin_type
-    return None
 
 
 def _parse_project_urls(

@@ -1,23 +1,43 @@
 import asyncio
 import math
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import click
 import httpx
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, HttpUrl, TypeAdapter
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    SerializationInfo,
+    SerializerFunctionWrapHandler,
+    TypeAdapter,
+    model_serializer,
+)
 from pydantic.json_schema import SkipJsonSchema
 
 from nomad_plugins.pyproject import (
     Author,
-    NomadPlugin,
+    PluginEntryPoint,
     PyProjectError,
     PyProjectTOML,
     parse_pyproject,
     parse_requirement_name,
     project_path_from_pyproject_path,
+)
+from nomad_plugins.transform import (
+    PluginType,
+    ProjectKind,
+    classify_project,
+    derive_plugin_types,
+    is_registry_visible,
+    normalize_dependencies,
+    sorted_unique,
+    stable_plugin_id,
 )
 
 # Load .env file if it exists
@@ -202,46 +222,67 @@ class GitHubSearchResultItem(BaseModel):
     score: float
 
 
-class PluginReference(BaseModel):
-    name: str
-    location: str
+class RepositoryStatus(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    archived: bool
+    fork: bool
+    stars: int
+    created_at: datetime | None = Field(default=None, alias='createdAt')
+    last_pushed_at: datetime | None = Field(default=None, alias='lastPushedAt')
+
+
+class DeploymentInfo(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    on_central: bool = Field(alias='onCentral')
+    on_example_oasis: bool = Field(alias='onExampleOasis')
 
 
 class Plugin(BaseModel):
-    repository: HttpUrl
-    stars: int
-    created: str
-    last_updated: str
-    owner: str
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str
     name: str
-    description: str | None = None
-    all_dependencies: SkipJsonSchema[set[str]] = Field(
-        default_factory=set,
-        description='Placeholder field to store all dependencies',
-        exclude=True,
+    description: str = ''
+    repository_url: HttpUrl = Field(alias='repositoryUrl')
+    documentation_url: HttpUrl | None = Field(default=None, alias='documentationUrl')
+    pypi_url: HttpUrl | None = Field(default=None, alias='pypiUrl')
+    owner: str
+    entrypoints: list[PluginEntryPoint] = Field(default_factory=list)
+    plugin_types: list[PluginType] | None = Field(default=None, alias='pluginTypes')
+    dependencies: list[str] = Field(default_factory=list)
+    status: RepositoryStatus
+    deployment: DeploymentInfo
+    project_kind: ProjectKind = Field(alias='projectKind')
+    registry_visible: bool = Field(alias='registryVisible')
+    metadata_source: Literal['pyproject.toml'] = Field(alias='metadataSource')
+    discovery_warnings: list[str] = Field(
+        default_factory=list,
+        alias='discoveryWarnings',
     )
     project_path: SkipJsonSchema[str | None] = Field(default=None, exclude=True)
     declared_repository_url: SkipJsonSchema[HttpUrl | None] = Field(
         default=None,
         exclude=True,
     )
-    documentation_url: SkipJsonSchema[HttpUrl | None] = Field(
-        default=None,
-        exclude=True,
-    )
     homepage_url: SkipJsonSchema[HttpUrl | None] = Field(default=None, exclude=True)
     issues_url: SkipJsonSchema[HttpUrl | None] = Field(default=None, exclude=True)
-    parsing_warnings: SkipJsonSchema[list[str]] = Field(
-        default_factory=list,
-        exclude=True,
+    authors: SkipJsonSchema[list[Author]] = Field(default_factory=list, exclude=True)
+    maintainers: SkipJsonSchema[list[Author]] = Field(
+        default_factory=list, exclude=True
     )
-    plugin_dependencies: list[PluginReference] = []
-    authors: list[Author] = []
-    maintainers: list[Author] = []
-    on_central: bool
-    on_example_oasis: bool
-    on_pypi: bool
-    plugin_entry_points: list[NomadPlugin] | None = None
+
+    @model_serializer(mode='wrap')
+    def serialize_model(
+        self,
+        handler: SerializerFunctionWrapHandler,
+        info: SerializationInfo,
+    ) -> dict[str, Any]:
+        data = handler(self)
+        if self.plugin_types is None:
+            data['pluginTypes' if info.by_alias else 'plugin_types'] = None
+        return data
 
 
 class OasisURLs(Enum):
@@ -375,33 +416,51 @@ async def get_plugin(
     on_pypi = await package_exists_on_pypi(name)
     on_central = name in central_plugins
     on_example_oasis = name in example_oasis_plugins
-    plugin_entry_points = (
-        project.entry_points.nomad_plugin if project.entry_points else []
-    )
+    entrypoints = project.entry_points.nomad_plugin if project.entry_points else []
     authors = project.authors or []
     maintainers = project.maintainers or []
-    all_dependencies = project.all_dependencies or set()
-    plugin = Plugin(
-        repository=repo_info.html_url,
-        stars=repo_details.stargazers_count,
-        created=repo_details.created_at,
-        last_updated=repo_details.updated_at,
-        owner=repo_info.owner.login,
+    dependencies = normalize_dependencies(project.all_dependencies or set())
+    repository_url = str(repo_info.html_url)
+    project_kind = classify_project(
         name=name,
-        all_dependencies=all_dependencies,
+        description=project.description or '',
+        repository_url=repository_url,
+        project_path=project.project_path,
+        dependencies=dependencies,
+        has_entrypoints=bool(entrypoints),
+    )
+    plugin = Plugin(
+        id=stable_plugin_id(repository_url, project.project_path),
+        name=name,
+        description=project.description or '',
+        repository_url=repo_info.html_url,
+        documentation_url=project.urls.documentation,
+        pypi_url=f'https://pypi.org/project/{name}/' if on_pypi else None,
+        owner=repo_info.owner.login,
+        entrypoints=entrypoints,
+        plugin_types=derive_plugin_types(entrypoint.type for entrypoint in entrypoints),
+        dependencies=dependencies,
+        status=RepositoryStatus(
+            archived=repo_details.archived,
+            fork=repo_details.fork,
+            stars=repo_details.stargazers_count,
+            created_at=repo_details.created_at,
+            last_pushed_at=repo_details.pushed_at,
+        ),
+        deployment=DeploymentInfo(
+            on_central=on_central,
+            on_example_oasis=on_example_oasis,
+        ),
+        project_kind=project_kind,
+        registry_visible=is_registry_visible(project_kind),
+        metadata_source='pyproject.toml',
+        discovery_warnings=sorted_unique(project.parsing_warnings),
         project_path=project.project_path,
         declared_repository_url=project.urls.repository,
-        documentation_url=project.urls.documentation,
         homepage_url=project.urls.homepage,
         issues_url=project.urls.issues,
-        parsing_warnings=project.parsing_warnings,
-        description=project.description,
         authors=authors,
         maintainers=maintainers,
-        on_central=on_central,
-        on_example_oasis=on_example_oasis,
-        on_pypi=on_pypi,
-        plugin_entry_points=plugin_entry_points,
     )
     return plugin
 
@@ -525,23 +584,7 @@ async def find_plugins(
         for future in asyncio.as_completed(tasks):
             plugin = await future
             if plugin:
-                plugins[plugin.name] = plugin
+                plugins[plugin.id] = plugin
             bar.update(1)
 
-    data: list[Plugin] = []
-
-    # Add nomad related dependencies to the plugin dependency list
-    for plugin in plugins.values():
-        nomad_related_deps = []
-        for dep in plugin.all_dependencies:
-            if plugin_dep := plugins.get(dep):
-                location = str(
-                    f'https://pypi.org/project/{dep}/'
-                    if plugin_dep.on_pypi
-                    else plugin_dep.repository
-                )
-                nomad_related_deps.append(PluginReference(name=dep, location=location))
-        plugin.plugin_dependencies = nomad_related_deps
-        data.append(plugin)
-
-    return data
+    return list(plugins.values())

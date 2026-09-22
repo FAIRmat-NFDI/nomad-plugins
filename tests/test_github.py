@@ -23,6 +23,29 @@ def _search_item(index: int) -> dict:
     }
 
 
+def test_code_search_uses_max_page_size_without_obsolete_sorting():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params['per_page'] == '100'
+        assert 'sort' not in request.url.params
+        assert 'order' not in request.url.params
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                'total_count': 0,
+                'incomplete_results': False,
+                'items': [],
+            },
+        )
+
+    async def run_search():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            async with GitHubClient('secret', client=http) as client:
+                return await client.search_code('query')
+
+    assert asyncio.run(run_search()).items == []
+
+
 def test_code_search_paginates_and_reports_diagnostics():
     expected_count = 2
     requests: list[httpx.Request] = []

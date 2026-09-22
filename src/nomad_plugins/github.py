@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, HttpUrl, ValidationError
 GITHUB_API_BASE_URL = 'https://api.github.com'
 GITHUB_API_VERSION = '2022-11-28'
 GITHUB_CODE_SEARCH_LIMIT = 1000
-DEFAULT_PER_PAGE = 30
+DEFAULT_PER_PAGE = 100
 DEFAULT_REQUEST_RETRIES = 2
 DEFAULT_REQUEST_TIMEOUT = 30.0
 DEFAULT_RETRY_BACKOFF = 0.25
@@ -161,8 +161,6 @@ class GitHubClient:
                 f'{self.base_url}/search/code',
                 params={
                     'q': query,
-                    'sort': 'stars',
-                    'order': 'desc',
                     'per_page': per_page,
                     'page': page_count,
                 },

@@ -37,9 +37,10 @@ def crawl(github_token: str, output: Path) -> None:
 
     diagnostics = result.search_diagnostics
     click.echo(
-        'GitHub code search fetched '
-        f'{diagnostics.fetched_count}/{diagnostics.total_count} results '
-        f'across {diagnostics.page_count} page(s).'
+        'GitHub code search received '
+        f'{diagnostics.fetched_count} result item(s) across '
+        f'{diagnostics.page_count} page(s); latest reported total: '
+        f'{diagnostics.total_count}.'
     )
     click.echo(f'Wrote {len(result.plugins)} plugins to {output}')
 

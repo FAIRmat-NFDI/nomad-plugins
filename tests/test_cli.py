@@ -98,7 +98,10 @@ def test_crawl_writes_deterministic_catalogue_snapshot_json(tmp_path):
     output_text = output.read_text(encoding='utf-8')
     CatalogueSnapshot.model_validate_json(output_text)
     data = json.loads(output_text)
-    assert 'GitHub code search fetched 2/2 results across 1 page(s).' in result.output
+    assert (
+        'GitHub code search received 2 result item(s) across 1 page(s); '
+        'latest reported total: 2.'
+    ) in result.output
     assert data['schemaVersion'] == '2.1.0'
     assert data['sourceSummary'] == {
         'pluginCount': 2,

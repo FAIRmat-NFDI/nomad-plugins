@@ -41,7 +41,7 @@ class GitHubSearchIncompleteError(GitHubError):
                 f"total_count exceeds GitHub's {GITHUB_CODE_SEARCH_LIMIT}-result "
                 'search window'
             )
-        if diagnostics.fetched_count != min(
+        if diagnostics.fetched_count < min(
             diagnostics.total_count,
             GITHUB_CODE_SEARCH_LIMIT,
         ):
@@ -153,6 +153,7 @@ class GitHubClient:
         incomplete_results = False
         result_limit_reached = False
         expected_count = 0
+        exhausted_early = False
 
         while page_count == 0 or len(items) < expected_count:
             page_count += 1
@@ -167,13 +168,17 @@ class GitHubClient:
             )
             page = self._validate_response(GitHubCodeSearchPage, response)
 
-            if page_count == 1:
-                total_count = page.total_count
-                result_limit_reached = total_count > GITHUB_CODE_SEARCH_LIMIT
-                expected_count = min(total_count, GITHUB_CODE_SEARCH_LIMIT)
+            total_count = page.total_count
+            result_limit_reached = (
+                result_limit_reached or total_count > GITHUB_CODE_SEARCH_LIMIT
+            )
+            expected_count = min(total_count, GITHUB_CODE_SEARCH_LIMIT)
 
             incomplete_results = incomplete_results or page.incomplete_results
             items.extend(page.items)
+
+            if not page.items and len(items) < expected_count:
+                exhausted_early = True
 
             if page.incomplete_results or result_limit_reached or not page.items:
                 break
@@ -190,7 +195,7 @@ class GitHubClient:
             incomplete_results=incomplete_results,
             result_limit_reached=result_limit_reached,
         )
-        if incomplete_results or result_limit_reached or len(items) != expected_count:
+        if incomplete_results or result_limit_reached or exhausted_early:
             raise GitHubSearchIncompleteError(diagnostics)
 
         return GitHubSearchResult(items=items, diagnostics=diagnostics)

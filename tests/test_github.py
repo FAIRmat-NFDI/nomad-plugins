@@ -84,6 +84,56 @@ def test_code_search_paginates_and_reports_diagnostics():
     assert requests[0].headers['X-GitHub-Api-Version'] == '2022-11-28'
 
 
+def test_code_search_follows_a_growing_live_result_count():
+    final_count = 3
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        page = int(request.url.params['page'])
+        total_count = 2 if page == 1 else final_count
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                'total_count': total_count,
+                'incomplete_results': False,
+                'items': [_search_item(page)],
+            },
+        )
+
+    async def run_search():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            async with GitHubClient('secret', client=http) as client:
+                return await client.search_code('query', per_page=1)
+
+    result = asyncio.run(run_search())
+
+    assert result.diagnostics.total_count == final_count
+    assert result.diagnostics.fetched_count == final_count
+    assert result.diagnostics.page_count == final_count
+
+
+def test_code_search_rejects_an_early_empty_page():
+    def handler(request: httpx.Request) -> httpx.Response:
+        page = int(request.url.params['page'])
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                'total_count': 2,
+                'incomplete_results': False,
+                'items': [_search_item(1)] if page == 1 else [],
+            },
+        )
+
+    async def run_search():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            async with GitHubClient('secret', client=http) as client:
+                return await client.search_code('query', per_page=1)
+
+    with pytest.raises(GitHubSearchIncompleteError, match='fetched 1 of 2'):
+        asyncio.run(run_search())
+
+
 @pytest.mark.parametrize(
     ('total_count', 'incomplete_results', 'message'),
     [

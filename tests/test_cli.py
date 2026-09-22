@@ -5,7 +5,8 @@ from click.testing import CliRunner
 
 from nomad_plugins.catalogue import CatalogueSnapshot
 from nomad_plugins.cli import main
-from nomad_plugins.crawler import DeploymentInfo, Plugin, RepositoryStatus
+from nomad_plugins.crawler import CrawlResult, DeploymentInfo, Plugin, RepositoryStatus
+from nomad_plugins.github import GitHubSearchDiagnostics, GitHubSearchIncompleteError
 from nomad_plugins.pyproject import PluginEntryPoint
 
 
@@ -21,6 +22,7 @@ def _plugin(
         name=name,
         repository_url=f'https://github.com/example/{name}',
         owner='example',
+        owner_type='Organization',
         entrypoints=entrypoints or [],
         plugin_types=plugin_types,
         dependencies=dependencies or [],
@@ -30,6 +32,7 @@ def _plugin(
             stars=1,
             created_at='2024-01-01T00:00:00Z',
             last_pushed_at='2024-01-02T00:00:00Z',
+            default_branch='main',
         ),
         deployment=DeploymentInfo(
             on_central=False,
@@ -38,6 +41,20 @@ def _plugin(
         project_kind='plugin',
         registry_visible=True,
         metadata_source='pyproject.toml',
+    )
+
+
+def _crawl_result(plugins: list[Plugin]) -> CrawlResult:
+    return CrawlResult(
+        plugins=plugins,
+        search_diagnostics=GitHubSearchDiagnostics(
+            query='nomad.plugin in:file filename:pyproject.toml',
+            total_count=len(plugins),
+            fetched_count=len(plugins),
+            page_count=1,
+            incomplete_results=False,
+            result_limit_reached=False,
+        ),
     )
 
 
@@ -61,7 +78,7 @@ def test_crawl_writes_deterministic_catalogue_snapshot_json(tmp_path):
 
     with patch(
         'nomad_plugins.cli.find_plugins',
-        new=AsyncMock(return_value=plugins),
+        new=AsyncMock(return_value=_crawl_result(plugins)),
     ) as find_plugins:
         result = CliRunner().invoke(
             main,
@@ -81,7 +98,8 @@ def test_crawl_writes_deterministic_catalogue_snapshot_json(tmp_path):
     output_text = output.read_text(encoding='utf-8')
     CatalogueSnapshot.model_validate_json(output_text)
     data = json.loads(output_text)
-    assert data['schemaVersion'] == '2.0.0'
+    assert 'GitHub code search fetched 2/2 results across 1 page(s).' in result.output
+    assert data['schemaVersion'] == '2.1.0'
     assert data['sourceSummary'] == {
         'pluginCount': 2,
         'projectKindCounts': {'plugin': 2},
@@ -106,7 +124,7 @@ def test_crawl_fails_without_replacing_existing_output_for_invalid_results(tmp_p
 
     with patch(
         'nomad_plugins.cli.find_plugins',
-        new=AsyncMock(return_value=[object()]),
+        new=AsyncMock(return_value=_crawl_result([object()])),
     ):
         result = CliRunner().invoke(
             main,
@@ -131,7 +149,7 @@ def test_crawl_preserves_existing_output_for_serialization_error(tmp_path):
     with (
         patch(
             'nomad_plugins.cli.find_plugins',
-            new=AsyncMock(return_value=[_plugin('alpha-plugin')]),
+            new=AsyncMock(return_value=_crawl_result([_plugin('alpha-plugin')])),
         ),
         patch(
             'nomad_plugins.catalogue.json.dumps',
@@ -152,3 +170,34 @@ def test_crawl_preserves_existing_output_for_serialization_error(tmp_path):
     assert result.exit_code != 0
     assert output.read_text(encoding='utf-8') == 'existing output'
     assert list(tmp_path.glob('*.tmp')) == []
+
+
+def test_incomplete_search_fails_without_writing_output(tmp_path):
+    output = tmp_path / 'plugins.json'
+    diagnostics = GitHubSearchDiagnostics(
+        query='query',
+        total_count=10,
+        fetched_count=1,
+        page_count=1,
+        incomplete_results=True,
+        result_limit_reached=False,
+    )
+
+    with patch(
+        'nomad_plugins.cli.find_plugins',
+        new=AsyncMock(side_effect=GitHubSearchIncompleteError(diagnostics)),
+    ):
+        result = CliRunner().invoke(
+            main,
+            [
+                'crawl',
+                '--github-token',
+                'github-token',
+                '--output',
+                str(output),
+            ],
+        )
+
+    assert result.exit_code != 0
+    assert 'GitHub code search is incomplete' in result.output
+    assert not output.exists()

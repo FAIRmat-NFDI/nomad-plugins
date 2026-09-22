@@ -33,6 +33,7 @@ def _plugin(  # noqa: PLR0913
         name=name,
         repository_url=f'https://github.com/example/{name}',
         owner='example',
+        owner_type='Organization',
         entrypoints=entrypoints or [],
         plugin_types=plugin_types,
         dependencies=dependencies or [],
@@ -42,6 +43,7 @@ def _plugin(  # noqa: PLR0913
             stars=1,
             created_at='2024-01-01T00:00:00Z',
             last_pushed_at='2024-01-02T00:00:00Z',
+            default_branch='main',
         ),
         deployment=DeploymentInfo(
             on_central=False,
@@ -95,7 +97,7 @@ def test_build_catalogue_snapshot_normalizes_public_output():
 
     data = snapshot.model_dump(mode='json', by_alias=True, exclude_none=True)
 
-    assert data['schemaVersion'] == '2.0.0'
+    assert data['schemaVersion'] == '2.1.0'
     assert data['dataUpdatedAt'] == '2024-01-03T00:00:00Z'
     assert data['sourceSummary'] == {
         'pluginCount': 2,
@@ -139,6 +141,7 @@ def test_plugin_public_contract_excludes_crawler_only_metadata():
         'description',
         'repositoryUrl',
         'owner',
+        'ownerType',
         'entrypoints',
         'pluginTypes',
         'dependencies',
@@ -176,7 +179,7 @@ def test_catalogue_snapshot_rejects_invalid_timestamp():
     with pytest.raises(ValidationError, match='dataUpdatedAt'):
         CatalogueSnapshot.model_validate(
             {
-                'schemaVersion': '2.0.0',
+                'schemaVersion': '2.1.0',
                 'dataUpdatedAt': 'not-a-timestamp',
                 'sourceSummary': {
                     'pluginCount': 0,

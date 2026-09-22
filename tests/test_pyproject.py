@@ -7,6 +7,13 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from nomad_plugins.crawler import get_plugin, get_toml_project
+from nomad_plugins.github import (
+    GitHubOwner,
+    GitHubRepositoryDetails,
+    GitHubRepositoryLink,
+    GitHubRepositorySummary,
+    GitHubSearchResultItem,
+)
 from nomad_plugins.pyproject import PyProjectError, PyProjectWarning, parse_pyproject
 
 
@@ -147,29 +154,27 @@ name = "poetry-plugin"
 
 
 def test_crawler_fetches_and_parses_nested_pyproject():
-    search_result = SimpleNamespace(
+    search_result = GitHubSearchResultItem(
         path='packages/example/pyproject.toml',
-        url='https://api.github.test/code?ref=abc123',
-        repository=SimpleNamespace(full_name='example/repository'),
+        url='https://api.github.test/contents/pyproject.toml?ref=abc123',
+        repository=GitHubRepositorySummary(
+            full_name='example/repository',
+            html_url='https://github.com/example/repository',
+        ),
     )
-    response = SimpleNamespace(
-        text="""
+    github_client = SimpleNamespace(
+        fetch_text=AsyncMock(
+            return_value="""
 [project]
 name = "example-plugin"
 """
+        )
     )
 
-    with patch(
-        'nomad_plugins.crawler.fetch_page_async',
-        new=AsyncMock(return_value=response),
-    ) as fetch_page:
-        project = asyncio.run(get_toml_project(search_result))
+    project = asyncio.run(get_toml_project(search_result, github_client))
 
-    fetch_page.assert_awaited_once_with(
-        url=(
-            'https://raw.githubusercontent.com/example/repository/abc123/'
-            'packages/example/pyproject.toml'
-        )
+    github_client.fetch_text.assert_awaited_once_with(
+        'https://api.github.test/contents/pyproject.toml?ref=abc123'
     )
     assert project is not None
     assert project.name == 'example-plugin'
@@ -197,28 +202,28 @@ example_parser = "example.parsers:parser_entry_point"
 """,
             pyproject_path='packages/parser/pyproject.toml',
         )
-    item = SimpleNamespace(
-        repository=SimpleNamespace(
-            url='https://api.github.test/repos/example/discovered',
+    item = GitHubSearchResultItem(
+        path='packages/parser/pyproject.toml',
+        url='https://api.github.test/contents/pyproject.toml?ref=abc123',
+        repository=GitHubRepositorySummary(
+            full_name='example/discovered',
             html_url='https://github.com/example/discovered',
-            owner=SimpleNamespace(login='example'),
-        )
+        ),
     )
-    repository_response = SimpleNamespace(json=lambda: {})
-    repository_details = SimpleNamespace(
+    repository_details = GitHubRepositoryDetails(
+        owner=GitHubOwner(login='example', type='Organization'),
         stargazers_count=5,
         created_at='2024-01-01T00:00:00Z',
-        updated_at='2024-01-02T00:00:00Z',
         pushed_at='2024-01-03T00:00:00Z',
         archived=False,
         fork=False,
+        default_branch='main',
+        parent=GitHubRepositoryLink(html_url='https://github.com/upstream/parent'),
+        source=GitHubRepositoryLink(html_url='https://github.com/upstream/source'),
     )
+    github_client = SimpleNamespace()
 
     with (
-        patch(
-            'nomad_plugins.crawler.fetch_page_async',
-            new=AsyncMock(return_value=repository_response),
-        ),
         patch(
             'nomad_plugins.crawler.get_toml_project',
             new=AsyncMock(return_value=project),
@@ -227,15 +232,12 @@ example_parser = "example.parsers:parser_entry_point"
             'nomad_plugins.crawler.package_exists_on_pypi',
             new=AsyncMock(return_value=True),
         ),
-        patch(
-            'nomad_plugins.crawler.GitHubRepositoryDetailed.model_validate',
-            return_value=repository_details,
-        ),
     ):
         plugin = asyncio.run(
             get_plugin(
                 item=item,
-                headers={},
+                github_client=github_client,
+                repository=repository_details,
                 central_plugins=set(),
                 example_oasis_plugins=set(),
             )
@@ -255,12 +257,28 @@ example_parser = "example.parsers:parser_entry_point"
     assert plugin.dependencies == ['helper-plugin', 'nomad-lab']
     assert plugin.project_kind == 'plugin'
     assert plugin.registry_visible is True
+    assert plugin.owner_type == 'Organization'
+    assert plugin.status.default_branch == 'main'
+    assert str(plugin.status.parent_repository_url) == (
+        'https://github.com/upstream/parent'
+    )
+    assert str(plugin.status.source_repository_url) == (
+        'https://github.com/upstream/source'
+    )
     assert plugin.status.last_pushed_at == datetime.fromisoformat(
         '2024-01-03T00:00:00+00:00'
     )
 
     public_data = plugin.model_dump(mode='json', by_alias=True, exclude_none=True)
     assert public_data['repositoryUrl'] == 'https://github.com/example/discovered'
+    assert public_data['ownerType'] == 'Organization'
+    assert public_data['status']['defaultBranch'] == 'main'
+    assert public_data['status']['parentRepositoryUrl'] == (
+        'https://github.com/upstream/parent'
+    )
+    assert public_data['status']['sourceRepositoryUrl'] == (
+        'https://github.com/upstream/source'
+    )
     assert public_data['documentationUrl'] == 'https://docs.example.com/parser'
     assert public_data['pypiUrl'] == 'https://pypi.org/project/example-parser/'
     assert public_data['pluginTypes'] == ['parser', 'unknown']

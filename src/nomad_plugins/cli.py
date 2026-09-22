@@ -29,13 +29,19 @@ def main() -> None:
 def crawl(github_token: str, output: Path) -> None:
     """Crawl plugin metadata and write a catalogue snapshot as JSON."""
     try:
-        plugins = asyncio.run(find_plugins(github_token))
-        snapshot = build_catalogue_snapshot(plugins)
+        result = asyncio.run(find_plugins(github_token))
+        snapshot = build_catalogue_snapshot(result.plugins)
         write_catalogue_snapshot(snapshot, output)
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
 
-    click.echo(f'Wrote {len(plugins)} plugins to {output}')
+    diagnostics = result.search_diagnostics
+    click.echo(
+        'GitHub code search fetched '
+        f'{diagnostics.fetched_count}/{diagnostics.total_count} results '
+        f'across {diagnostics.page_count} page(s).'
+    )
+    click.echo(f'Wrote {len(result.plugins)} plugins to {output}')
 
 
 if __name__ == '__main__':

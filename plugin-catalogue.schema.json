@@ -126,6 +126,18 @@
           "title": "Owner",
           "type": "string"
         },
+        "ownerType": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ownertype"
+        },
         "pluginTypes": {
           "anyOf": [
             {
@@ -264,6 +276,18 @@
           "default": null,
           "title": "Createdat"
         },
+        "defaultBranch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Defaultbranch"
+        },
         "fork": {
           "title": "Fork",
           "type": "boolean"
@@ -280,6 +304,36 @@
           ],
           "default": null,
           "title": "Lastpushedat"
+        },
+        "parentRepositoryUrl": {
+          "anyOf": [
+            {
+              "format": "uri",
+              "maxLength": 2083,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parentrepositoryurl"
+        },
+        "sourceRepositoryUrl": {
+          "anyOf": [
+            {
+              "format": "uri",
+              "maxLength": 2083,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sourcerepositoryurl"
         },
         "stars": {
           "title": "Stars",
@@ -317,7 +371,7 @@
       "type": "array"
     },
     "schemaVersion": {
-      "const": "2.0.0",
+      "const": "2.1.0",
       "title": "Schemaversion",
       "type": "string"
     },

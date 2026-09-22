@@ -13,7 +13,7 @@ from nomad_plugins.transform import ProjectKind
 # Schema versioning is independent of the package version.
 # MAJOR: breaking JSON contract changes; MINOR: compatible additions;
 # PATCH: schema/documentation fixes that do not change valid JSON instances.
-SCHEMA_VERSION: Final = '2.0.0'
+SCHEMA_VERSION: Final = '2.1.0'
 DEFAULT_SCHEMA_PATH = Path('plugin-catalogue.schema.json')
 
 

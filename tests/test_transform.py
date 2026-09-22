@@ -60,6 +60,8 @@ def test_official_project_kinds_can_be_represented_explicitly():
     )
     assert is_registry_visible('official_template') is True
     assert is_registry_visible('official_software') is True
+    assert is_registry_visible('plugin', archived=True) is False
+    assert is_registry_visible('plugin', fork=True) is False
 
 
 def _classify(

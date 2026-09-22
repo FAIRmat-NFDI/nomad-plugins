@@ -162,8 +162,13 @@ def classify_project(  # noqa: PLR0913
     return 'ecosystem_package'
 
 
-def is_registry_visible(project_kind: ProjectKind) -> bool:
-    return project_kind in VISIBLE_PROJECT_KINDS
+def is_registry_visible(
+    project_kind: ProjectKind,
+    *,
+    archived: bool = False,
+    fork: bool = False,
+) -> bool:
+    return project_kind in VISIBLE_PROJECT_KINDS and not archived and not fork
 
 
 def sorted_unique(values: Iterable[str]) -> list[str]:

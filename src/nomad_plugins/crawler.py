@@ -1,5 +1,5 @@
 import asyncio
-import math
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -15,11 +15,16 @@ from pydantic import (
     HttpUrl,
     SerializationInfo,
     SerializerFunctionWrapHandler,
-    TypeAdapter,
     model_serializer,
 )
 from pydantic.json_schema import SkipJsonSchema
 
+from nomad_plugins.github import (
+    GitHubClient,
+    GitHubRepositoryDetails,
+    GitHubSearchDiagnostics,
+    GitHubSearchResultItem,
+)
 from nomad_plugins.pyproject import (
     Author,
     PluginEntryPoint,
@@ -46,182 +51,6 @@ if env_path.exists():
     load_dotenv(env_path)
 
 
-class GitHubOwner(BaseModel):
-    login: str
-    id: int
-    node_id: str
-    avatar_url: HttpUrl
-    gravatar_id: str
-    url: HttpUrl
-    html_url: HttpUrl
-    followers_url: str
-    following_url: str
-    gists_url: str
-    starred_url: str
-    subscriptions_url: HttpUrl
-    organizations_url: HttpUrl
-    repos_url: HttpUrl
-    events_url: str
-    received_events_url: HttpUrl
-    type: str
-    site_admin: bool
-    user_view_type: str | None
-
-
-class GitHubRepository(BaseModel):
-    id: int
-    node_id: str
-    name: str
-    full_name: str
-    private: bool
-    owner: GitHubOwner
-    html_url: HttpUrl
-    description: str | None
-    fork: bool
-    url: HttpUrl
-    forks_url: HttpUrl
-    keys_url: str
-    collaborators_url: str
-    teams_url: HttpUrl
-    hooks_url: HttpUrl
-    issue_events_url: str
-    events_url: HttpUrl
-    assignees_url: str
-    branches_url: str
-    tags_url: HttpUrl
-    blobs_url: str
-    git_tags_url: str
-    git_refs_url: str
-    trees_url: str
-    statuses_url: str
-    languages_url: HttpUrl
-    stargazers_url: HttpUrl
-    contributors_url: HttpUrl
-    subscribers_url: HttpUrl
-    subscription_url: HttpUrl
-    commits_url: str
-    git_commits_url: str
-    comments_url: str
-    issue_comment_url: str
-    contents_url: str
-    compare_url: str
-    merges_url: HttpUrl
-    archive_url: str
-    downloads_url: HttpUrl
-    issues_url: str
-    pulls_url: str
-    milestones_url: str
-    notifications_url: str
-    labels_url: str
-    releases_url: str
-    deployments_url: HttpUrl
-
-
-class License(BaseModel):
-    key: str | None = None
-    name: str | None = None
-    spdx_id: str | None = None
-    url: HttpUrl | None = None
-    node_id: str | None = None
-
-
-class GitHubRepositoryDetailed(BaseModel):
-    id: int
-    node_id: str
-    name: str
-    full_name: str
-    private: bool
-    owner: GitHubOwner
-    html_url: HttpUrl
-    description: str | None = None
-    fork: bool
-    url: HttpUrl
-    forks_url: HttpUrl
-    keys_url: str
-    collaborators_url: str
-    teams_url: HttpUrl
-    hooks_url: HttpUrl
-    issue_events_url: str
-    events_url: HttpUrl
-    assignees_url: str
-    branches_url: str
-    tags_url: HttpUrl
-    blobs_url: str
-    git_tags_url: str
-    git_refs_url: str
-    trees_url: str
-    statuses_url: str
-    languages_url: HttpUrl
-    stargazers_url: HttpUrl
-    contributors_url: HttpUrl
-    subscribers_url: HttpUrl
-    subscription_url: HttpUrl
-    commits_url: str
-    git_commits_url: str
-    comments_url: str
-    issue_comment_url: str
-    contents_url: str
-    compare_url: str
-    merges_url: HttpUrl
-    archive_url: str
-    downloads_url: HttpUrl
-    issues_url: str
-    pulls_url: str
-    milestones_url: str
-    notifications_url: str
-    labels_url: str
-    releases_url: str
-    deployments_url: HttpUrl
-    created_at: str  # ISO 8601 date
-    updated_at: str  # ISO 8601 date
-    pushed_at: str  # ISO 8601 date
-    git_url: str
-    ssh_url: str
-    clone_url: HttpUrl
-    svn_url: HttpUrl
-    homepage: str | None
-    size: int
-    stargazers_count: int
-    watchers_count: int
-    language: str | None
-    has_issues: bool
-    has_projects: bool
-    has_downloads: bool
-    has_wiki: bool
-    has_pages: bool
-    has_discussions: bool
-    forks_count: int
-    mirror_url: str | None
-    archived: bool
-    disabled: bool
-    open_issues_count: int
-    license: License | None
-    allow_forking: bool
-    is_template: bool
-    web_commit_signoff_required: bool
-    topics: list[str]
-    visibility: str
-    forks: int
-    open_issues: int
-    watchers: int
-    default_branch: str
-    permissions: dict
-    template_repository: Any = None
-    network_count: int
-    subscribers_count: int
-
-
-class GitHubSearchResultItem(BaseModel):
-    name: str
-    path: str
-    sha: str
-    url: HttpUrl
-    git_url: HttpUrl
-    html_url: HttpUrl
-    repository: GitHubRepository
-    score: float
-
-
 class RepositoryStatus(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -230,6 +59,15 @@ class RepositoryStatus(BaseModel):
     stars: int
     created_at: datetime | None = Field(default=None, alias='createdAt')
     last_pushed_at: datetime | None = Field(default=None, alias='lastPushedAt')
+    default_branch: str | None = Field(default=None, alias='defaultBranch')
+    parent_repository_url: HttpUrl | None = Field(
+        default=None,
+        alias='parentRepositoryUrl',
+    )
+    source_repository_url: HttpUrl | None = Field(
+        default=None,
+        alias='sourceRepositoryUrl',
+    )
 
 
 class DeploymentInfo(BaseModel):
@@ -249,6 +87,7 @@ class Plugin(BaseModel):
     documentation_url: HttpUrl | None = Field(default=None, alias='documentationUrl')
     pypi_url: HttpUrl | None = Field(default=None, alias='pypiUrl')
     owner: str
+    owner_type: str | None = Field(default=None, alias='ownerType')
     entrypoints: list[PluginEntryPoint] = Field(default_factory=list)
     plugin_types: list[PluginType] | None = Field(default=None, alias='pluginTypes')
     dependencies: list[str] = Field(default_factory=list)
@@ -285,20 +124,25 @@ class Plugin(BaseModel):
         return data
 
 
+@dataclass(frozen=True)
+class CrawlResult:
+    plugins: list[Plugin]
+    search_diagnostics: GitHubSearchDiagnostics
+
+
 class OasisURLs(Enum):
     CENTRAL = (
         'https://gitlab.mpcdf.mpg.de/nomad-lab/nomad-distro/-/raw/main/requirements.txt'
     )
-
-    EXAMPLE = 'https://gitlab.mpcdf.mpg.de/nomad-lab/nomad-distro/-/raw/test-oasis/requirements.txt'
-
-
-# GitHub Code Search API URL
-GITHUB_CODE_API = 'https://api.github.com/search/code'
-GITHUB_REPO_API = 'https://api.github.com/repos'
+    EXAMPLE = (
+        'https://gitlab.mpcdf.mpg.de/nomad-lab/nomad-distro/-/raw/'
+        'test-oasis/requirements.txt'
+    )
 
 
-# The following two repositories are not actual plugins
+GITHUB_CODE_SEARCH_QUERY = 'nomad.plugin in:file filename:pyproject.toml'
+
+# The following repositories are not actual plugins.
 EXCLUDED_REPOS = {
     'nomad-coe/nomad',
     'FAIRmat-NFDI/cookiecutter-nomad-plugin',
@@ -309,13 +153,7 @@ EXCLUDED_REPOS = {
 async def fetch_nomad_deployment_requirements(
     requirements_url: str,
 ) -> set[str]:
-    """
-    Fetches and parses a `requirements.txt` file from a given URL.
-    Args:
-        requirements_url (str): The URL of the `requirements.txt` file.
-    Returns:
-        set: set of dependencies
-    """
+    """Fetch package names from a NOMAD deployment requirements file."""
     response = await fetch_page_async(requirements_url)
     if response:
         return {
@@ -329,55 +167,24 @@ async def fetch_nomad_deployment_requirements(
 
 async def get_toml_project(
     search_result: GitHubSearchResultItem,
+    github_client: GitHubClient,
 ) -> PyProjectTOML | None:
-    """
-    Fetches and parses the `pyproject.toml` file from a given GitHub repository.
-    Args:
-        search_result (GitHubSearchResultItem): The search result from the GitHub code
-                                                search.
-        subdirectory (str): The subdirectory within the repository where the
-                            `pyproject.toml` file is located.
-        headers (dict): The headers to include in the request, typically containing
-                        authorization information.
-    Returns:
-        dict: A dictionary containing the 'project' section of the `pyproject.toml` file
-              if successful, otherwise an empty dictionary.
-    """
-    commit_sha = str(search_result.url).split('ref=')[-1]
-
+    """Fetch and parse a pyproject found by GitHub code search."""
     try:
         project_path_from_pyproject_path(search_result.path)
     except PyProjectError:
         return None
 
-    if not commit_sha:
+    content = await github_client.fetch_text(str(search_result.url))
+    try:
+        return parse_pyproject(content, pyproject_path=search_result.path)
+    except PyProjectError as exc:
+        click.echo(f'Failed to parse pyproject.toml from {search_result.url}: {exc}')
         return None
-
-    raw_url = f'https://raw.githubusercontent.com/{search_result.repository.full_name}/{commit_sha}/{search_result.path}'
-
-    response = await fetch_page_async(url=raw_url)
-    if response:
-        try:
-            return parse_pyproject(
-                response.text,
-                pyproject_path=search_result.path,
-            )
-        except PyProjectError as e:
-            click.echo(f'Failed to parse pyproject.toml from {raw_url}: {e}')
-    return None
 
 
 async def package_exists_on_pypi(package_name: str) -> bool:
-    """
-    Checks if a package exists on PyPI using a HEAD request.
-
-    Args:
-        package_name: The name of the package to check.
-
-    Returns:
-        True if the package exists (HTTP status code 200), False otherwise
-        (including network errors).
-    """
+    """Return whether PyPI currently has a project with this name."""
     async with httpx.AsyncClient() as client:
         try:
             url = f'https://pypi.org/pypi/{package_name}/json'
@@ -387,40 +194,24 @@ async def package_exists_on_pypi(package_name: str) -> bool:
             return False
 
 
-async def get_plugin(
+async def get_plugin(  # noqa: PLR0913
     *,
     item: GitHubSearchResultItem,
-    headers: dict,
+    github_client: GitHubClient,
+    repository: GitHubRepositoryDetails,
     central_plugins: set[str],
     example_oasis_plugins: set[str],
 ) -> Plugin | None:
-    """
-    Extracts plugin information from a given repository item and returns it as a
-    dictionary.
-    Args:
-        item (GitHubSearchResultItem): Item returned by Github Search
-        headers (dict): A dictionary containing HTTP headers for making requests to
-                        external services.
-        central_plugins (set[str]): All plugins in central installation
-        example_oasis_plugins (set[str]): All plugins in example oasis installation
-    """
-
-    repo_info = item.repository
-    repo_contents_task = fetch_page_async(url=str(repo_info.url), headers=headers)
-    project_task = get_toml_project(item)
-    repo_contents, project = await asyncio.gather(*[repo_contents_task, project_task])
-    if not repo_contents or not project:
+    """Build one public plugin record from a discovered pyproject."""
+    project = await get_toml_project(item, github_client)
+    if project is None:
         return None
-    repo_details = GitHubRepositoryDetailed.model_validate(repo_contents.json())
+
     name = project.name
     on_pypi = await package_exists_on_pypi(name)
-    on_central = name in central_plugins
-    on_example_oasis = name in example_oasis_plugins
     entrypoints = project.entry_points.nomad_plugin if project.entry_points else []
-    authors = project.authors or []
-    maintainers = project.maintainers or []
     dependencies = normalize_dependencies(project.all_dependencies or set())
-    repository_url = str(repo_info.html_url)
+    repository_url = str(item.repository.html_url)
     project_kind = classify_project(
         name=name,
         description=project.description or '',
@@ -429,157 +220,122 @@ async def get_plugin(
         dependencies=dependencies,
         has_entrypoints=bool(entrypoints),
     )
-    plugin = Plugin(
+
+    return Plugin(
         id=stable_plugin_id(repository_url, project.project_path),
         name=name,
         description=project.description or '',
-        repository_url=repo_info.html_url,
+        repository_url=item.repository.html_url,
         documentation_url=project.urls.documentation,
         pypi_url=f'https://pypi.org/project/{name}/' if on_pypi else None,
-        owner=repo_info.owner.login,
+        owner=repository.owner.login,
+        owner_type=repository.owner.type,
         entrypoints=entrypoints,
         plugin_types=derive_plugin_types(entrypoint.type for entrypoint in entrypoints),
         dependencies=dependencies,
         status=RepositoryStatus(
-            archived=repo_details.archived,
-            fork=repo_details.fork,
-            stars=repo_details.stargazers_count,
-            created_at=repo_details.created_at,
-            last_pushed_at=repo_details.pushed_at,
+            archived=repository.archived,
+            fork=repository.fork,
+            stars=repository.stargazers_count,
+            created_at=repository.created_at,
+            last_pushed_at=repository.pushed_at,
+            default_branch=repository.default_branch,
+            parent_repository_url=(
+                repository.parent.html_url if repository.parent else None
+            ),
+            source_repository_url=(
+                repository.source.html_url if repository.source else None
+            ),
         ),
         deployment=DeploymentInfo(
-            on_central=on_central,
-            on_example_oasis=on_example_oasis,
+            on_central=name in central_plugins,
+            on_example_oasis=name in example_oasis_plugins,
         ),
         project_kind=project_kind,
-        registry_visible=is_registry_visible(project_kind),
+        registry_visible=is_registry_visible(
+            project_kind,
+            archived=repository.archived,
+            fork=repository.fork,
+        ),
         metadata_source='pyproject.toml',
         discovery_warnings=sorted_unique(project.parsing_warnings),
         project_path=project.project_path,
         declared_repository_url=project.urls.repository,
         homepage_url=project.urls.homepage,
         issues_url=project.urls.issues,
-        authors=authors,
-        maintainers=maintainers,
+        authors=project.authors or [],
+        maintainers=project.maintainers or [],
     )
-    return plugin
 
 
 async def fetch_page_async(
-    url: str, *, headers: dict | None = None, params: dict | None = None
+    url: str,
+    *,
+    headers: dict | None = None,
+    params: dict | None = None,
 ) -> httpx.Response | None:
+    """Fetch a non-GitHub page used by the current enrichment logic."""
     async with httpx.AsyncClient() as client:
         try:
             response = await client.get(url, headers=headers, params=params)
             response.raise_for_status()
             return response
-        except httpx.HTTPStatusError:
-            # print(f'HTTP error: {e}')
+        except (httpx.HTTPStatusError, httpx.RequestError):
             return None
-        except httpx.RequestError:
-            # print(f'Request error: {e}')
-            return None
-        except Exception:
-            # print(f'Unexpected error: {e}')
-            return None
-
-
-async def fetch_all_results_parallel_async(
-    *, url: str, headers: dict, params: dict
-) -> list[GitHubSearchResultItem]:
-    """
-    Asynchronously fetches all pages of results from a paginated API in parallel.
-
-    Args:
-        url: The base URL of the API endpoint.
-        headers: The headers to include in the request.
-        params: The initial query parameters.
-
-    Returns:
-        A list of `GitHubSearchResultItem`, where each item represents the JSON response
-        from a single page.
-    """
-    try:
-        initial_response = await fetch_page_async(
-            url=url, headers=headers, params=params
-        )
-        items = []
-        if initial_response is None:
-            return []
-        initial_response = initial_response.json()
-
-        items.extend(initial_response.get('items', []))
-        total_count = initial_response['total_count']
-        per_page = params.get('per_page', 30)
-        num_pages = math.ceil(total_count / per_page)
-
-        tasks = [
-            fetch_page_async(url=url, headers=headers, params={**params, 'page': page})
-            # start with second page since the initial_response contains
-            # results for the first page
-            for page in range(2, num_pages + 1)
-        ]
-
-        with click.progressbar(
-            length=len(tasks), label='Fetching Github Search data'
-        ) as bar:
-            for future in asyncio.as_completed(tasks):
-                res = await future
-                if res:
-                    items.extend(res.json().get('items', []))
-                bar.update(1)
-
-        search_result_item_adapter = TypeAdapter(list[GitHubSearchResultItem])
-        validated_data = search_result_item_adapter.validate_python(items)
-        return validated_data
-
-    except Exception as e:
-        print(f'Unexpected error: {e}')
-        return []
 
 
 async def find_plugins(
     token: str,
-) -> list[Plugin]:
-    """
-    Find and retrieve Nomad plugins from GitHub repositories.
-    This function searches for repositories containing Nomad plugins by querying
-    the GitHub Code Search API. It retrieves the plugins from repositories that
-    have 'nomad.plugin' entry points defined in their `pyproject.toml` files.
-    Args:
-        token (str): GitHub personal access token for authentication.
-    """
-    example_oasis_plugins = await fetch_nomad_deployment_requirements(
-        OasisURLs.EXAMPLE.value
-    )
-    central_plugins = await fetch_nomad_deployment_requirements(OasisURLs.CENTRAL.value)
+    *,
+    github_client: GitHubClient | None = None,
+) -> CrawlResult:
+    """Find and retrieve NOMAD plugins with the current single search query."""
+    if github_client is not None:
+        return await _find_plugins(github_client)
 
-    query = 'nomad.plugin in:file filename:pyproject.toml'
-    params = {
-        'q': query,
-        'sort': 'stars',
-        'order': 'desc',
-        'per_page': 30,
-    }
-    headers = {'Authorization': f'token {token}'}
-    search_items = await fetch_all_results_parallel_async(
-        url=GITHUB_CODE_API, headers=headers, params=params
+    async with GitHubClient(token) as client:
+        return await _find_plugins(client)
+
+
+async def _find_plugins(github_client: GitHubClient) -> CrawlResult:
+    example_task = fetch_nomad_deployment_requirements(OasisURLs.EXAMPLE.value)
+    central_task = fetch_nomad_deployment_requirements(OasisURLs.CENTRAL.value)
+    search_task = github_client.search_code(GITHUB_CODE_SEARCH_QUERY)
+    example_oasis_plugins, central_plugins, search_result = await asyncio.gather(
+        example_task,
+        central_task,
+        search_task,
     )
+
+    search_items = [
+        item
+        for item in search_result.items
+        if item.repository.full_name not in EXCLUDED_REPOS
+    ]
+    repository_names = sorted(
+        {item.repository.full_name for item in search_items},
+        key=str.casefold,
+    )
+    repository_details = await asyncio.gather(
+        *(github_client.fetch_repository(name) for name in repository_names)
+    )
+    repositories = dict(zip(repository_names, repository_details, strict=True))
 
     tasks = [
         get_plugin(
             item=item,
-            headers=headers,
+            github_client=github_client,
+            repository=repositories[item.repository.full_name],
             central_plugins=central_plugins,
             example_oasis_plugins=example_oasis_plugins,
         )
         for item in search_items
-        if item.repository.full_name not in EXCLUDED_REPOS
     ]
 
     plugins: dict[str, Plugin] = {}
     with click.progressbar(
-        length=len(tasks), label='Fetching individual plugin data'
+        length=len(tasks),
+        label='Fetching individual plugin data',
     ) as bar:
         for future in asyncio.as_completed(tasks):
             plugin = await future
@@ -587,4 +343,7 @@ async def find_plugins(
                 plugins[plugin.id] = plugin
             bar.update(1)
 
-    return list(plugins.values())
+    return CrawlResult(
+        plugins=list(plugins.values()),
+        search_diagnostics=search_result.diagnostics,
+    )

@@ -5,6 +5,7 @@ from click.testing import CliRunner
 
 from nomad_plugins.catalogue import CatalogueSnapshot
 from nomad_plugins.cli import main
+from nomad_plugins.config import PRIMARY_CODE_SEARCH_QUERY
 from nomad_plugins.crawler import CrawlResult, DeploymentInfo, Plugin, RepositoryStatus
 from nomad_plugins.github import GitHubSearchDiagnostics, GitHubSearchIncompleteError
 from nomad_plugins.pyproject import PluginEntryPoint
@@ -47,14 +48,17 @@ def _plugin(
 def _crawl_result(plugins: list[Plugin]) -> CrawlResult:
     return CrawlResult(
         plugins=plugins,
-        search_diagnostics=GitHubSearchDiagnostics(
-            query='nomad.plugin in:file filename:pyproject.toml',
-            total_count=len(plugins),
-            fetched_count=len(plugins),
-            page_count=1,
-            incomplete_results=False,
-            result_limit_reached=False,
-        ),
+        search_diagnostics=[
+            GitHubSearchDiagnostics(
+                query=PRIMARY_CODE_SEARCH_QUERY,
+                total_count=len(plugins),
+                fetched_count=len(plugins),
+                page_count=1,
+                incomplete_results=False,
+                result_limit_reached=False,
+            )
+        ],
+        unique_candidate_count=len(plugins),
     )
 
 
@@ -92,16 +96,23 @@ def test_crawl_writes_deterministic_catalogue_snapshot_json(tmp_path):
         )
 
     assert result.exit_code == 0, result.output
-    find_plugins.assert_awaited_once_with('github-token')
+    find_plugins.assert_awaited_once()
+    assert find_plugins.await_args.args == ('github-token',)
+    assert find_plugins.await_args.kwargs['config'].github.code_search_queries == [
+        PRIMARY_CODE_SEARCH_QUERY,
+        'nomad-lab in:file filename:pyproject.toml',
+    ]
     assert output.read_text(encoding='utf-8').endswith('\n')
 
     output_text = output.read_text(encoding='utf-8')
     CatalogueSnapshot.model_validate_json(output_text)
     data = json.loads(output_text)
     assert (
-        'GitHub code search received 2 result item(s) across 1 page(s); '
+        f"GitHub code search '{PRIMARY_CODE_SEARCH_QUERY}': received "
+        '2 result item(s) across 1 page(s); '
         'latest reported total: 2.'
     ) in result.output
+    assert 'Unique pyproject.toml candidates: 2.' in result.output
     assert data['schemaVersion'] == '2.1.0'
     assert data['sourceSummary'] == {
         'pluginCount': 2,
@@ -203,4 +214,58 @@ def test_incomplete_search_fails_without_writing_output(tmp_path):
 
     assert result.exit_code != 0
     assert 'GitHub code search is incomplete' in result.output
+    assert "query 'query'" in result.output
     assert not output.exists()
+
+
+def test_queries_prints_packaged_configuration_without_credentials():
+    result = CliRunner().invoke(main, ['queries'])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output) == {
+        'github': {
+            'codeSearchQueries': [
+                PRIMARY_CODE_SEARCH_QUERY,
+                'nomad-lab in:file filename:pyproject.toml',
+            ],
+            'codeSearchRequestDelaySeconds': 6.5,
+        }
+    }
+
+
+def test_crawl_accepts_custom_configuration(tmp_path):
+    output = tmp_path / 'plugins.json'
+    config_path = tmp_path / 'config.json'
+    config_path.write_text(
+        json.dumps(
+            {
+                'github': {
+                    'codeSearchQueries': [PRIMARY_CODE_SEARCH_QUERY],
+                    'codeSearchRequestDelaySeconds': 0,
+                }
+            }
+        ),
+        encoding='utf-8',
+    )
+
+    with patch(
+        'nomad_plugins.cli.find_plugins',
+        new=AsyncMock(return_value=_crawl_result([])),
+    ) as find_plugins:
+        result = CliRunner().invoke(
+            main,
+            [
+                'crawl',
+                '--config',
+                str(config_path),
+                '--github-token',
+                'github-token',
+                '--output',
+                str(output),
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    config = find_plugins.await_args.kwargs['config']
+    assert config.github.code_search_queries == [PRIMARY_CODE_SEARCH_QUERY]
+    assert config.github.code_search_request_delay_seconds == 0

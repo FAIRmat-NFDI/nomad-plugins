@@ -19,6 +19,7 @@ from pydantic import (
 )
 from pydantic.json_schema import SkipJsonSchema
 
+from nomad_plugins.config import CatalogueConfig, load_catalogue_config
 from nomad_plugins.github import (
     GitHubClient,
     GitHubRepositoryDetails,
@@ -127,7 +128,8 @@ class Plugin(BaseModel):
 @dataclass(frozen=True)
 class CrawlResult:
     plugins: list[Plugin]
-    search_diagnostics: GitHubSearchDiagnostics
+    search_diagnostics: list[GitHubSearchDiagnostics]
+    unique_candidate_count: int
 
 
 class OasisURLs(Enum):
@@ -139,8 +141,6 @@ class OasisURLs(Enum):
         'test-oasis/requirements.txt'
     )
 
-
-GITHUB_CODE_SEARCH_QUERY = 'nomad.plugin in:file filename:pyproject.toml'
 
 # The following repositories are not actual plugins.
 EXCLUDED_REPOS = {
@@ -287,31 +287,65 @@ async def fetch_page_async(
 async def find_plugins(
     token: str,
     *,
+    config: CatalogueConfig | None = None,
     github_client: GitHubClient | None = None,
 ) -> CrawlResult:
-    """Find and retrieve NOMAD plugins with the current single search query."""
+    """Find and retrieve NOMAD plugins with the configured code searches."""
+    catalogue_config = config or load_catalogue_config()
     if github_client is not None:
-        return await _find_plugins(github_client)
+        return await _find_plugins(github_client, catalogue_config)
 
     async with GitHubClient(token) as client:
-        return await _find_plugins(client)
+        return await _find_plugins(client, catalogue_config)
 
 
-async def _find_plugins(github_client: GitHubClient) -> CrawlResult:
+async def discover_code_search_candidates(
+    github_client: GitHubClient,
+    config: CatalogueConfig,
+) -> tuple[list[GitHubSearchResultItem], list[GitHubSearchDiagnostics]]:
+    candidates: dict[tuple[str, str], GitHubSearchResultItem] = {}
+    diagnostics: list[GitHubSearchDiagnostics] = []
+    excluded_repositories = {repository.casefold() for repository in EXCLUDED_REPOS}
+
+    for query in config.github.code_search_queries:
+        result = await github_client.search_code(
+            query,
+            request_delay_seconds=config.github.code_search_request_delay_seconds,
+        )
+        diagnostics.append(result.diagnostics)
+        for item in result.items:
+            if item.repository.full_name.casefold() in excluded_repositories:
+                continue
+            try:
+                key = code_search_candidate_key(item)
+            except PyProjectError:
+                continue
+            candidates.setdefault(key, item)
+
+    return (
+        [candidates[key] for key in sorted(candidates)],
+        diagnostics,
+    )
+
+
+def code_search_candidate_key(item: GitHubSearchResultItem) -> tuple[str, str]:
+    project_path = project_path_from_pyproject_path(item.path)
+    return (item.repository.full_name.casefold(), project_path or '')
+
+
+async def _find_plugins(
+    github_client: GitHubClient,
+    config: CatalogueConfig,
+) -> CrawlResult:
     example_task = fetch_nomad_deployment_requirements(OasisURLs.EXAMPLE.value)
     central_task = fetch_nomad_deployment_requirements(OasisURLs.CENTRAL.value)
-    search_task = github_client.search_code(GITHUB_CODE_SEARCH_QUERY)
-    example_oasis_plugins, central_plugins, search_result = await asyncio.gather(
+    search_task = discover_code_search_candidates(github_client, config)
+    example_oasis_plugins, central_plugins, search_data = await asyncio.gather(
         example_task,
         central_task,
         search_task,
     )
-
-    search_items = [
-        item
-        for item in search_result.items
-        if item.repository.full_name not in EXCLUDED_REPOS
-    ]
+    search_items, search_diagnostics = search_data
     repository_names = sorted(
         {item.repository.full_name for item in search_items},
         key=str.casefold,
@@ -344,6 +378,7 @@ async def _find_plugins(github_client: GitHubClient) -> CrawlResult:
             bar.update(1)
 
     return CrawlResult(
-        plugins=list(plugins.values()),
-        search_diagnostics=search_result.diagnostics,
+        plugins=[plugins[plugin_id] for plugin_id in sorted(plugins)],
+        search_diagnostics=search_diagnostics,
+        unique_candidate_count=len(search_items),
     )

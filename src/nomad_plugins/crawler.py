@@ -22,8 +22,10 @@ from pydantic.json_schema import SkipJsonSchema
 from nomad_plugins.config import CatalogueConfig, load_catalogue_config
 from nomad_plugins.github import (
     GitHubClient,
+    GitHubError,
     GitHubRepositoryDetails,
     GitHubSearchDiagnostics,
+    GitHubSearchIncompleteError,
     GitHubSearchResultItem,
 )
 from nomad_plugins.pyproject import (
@@ -308,10 +310,17 @@ async def discover_code_search_candidates(
     excluded_repositories = {repository.casefold() for repository in EXCLUDED_REPOS}
 
     for query in config.github.code_search_queries:
-        result = await github_client.search_code(
-            query,
-            request_delay_seconds=config.github.code_search_request_delay_seconds,
-        )
+        try:
+            result = await github_client.search_code(
+                query,
+                request_delay_seconds=config.github.code_search_request_delay_seconds,
+            )
+        except GitHubSearchIncompleteError:
+            raise
+        except GitHubError as exc:
+            raise GitHubError(
+                f'GitHub code search failed for query {query!r}: {exc}'
+            ) from exc
         diagnostics.append(result.diagnostics)
         for item in result.items:
             if item.repository.full_name.casefold() in excluded_repositories:

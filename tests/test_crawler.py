@@ -2,6 +2,8 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, call, patch
 
+import pytest
+
 from nomad_plugins.config import (
     PRIMARY_CODE_SEARCH_QUERY,
     CatalogueConfig,
@@ -11,9 +13,11 @@ from nomad_plugins.crawler import (
     DeploymentInfo,
     Plugin,
     RepositoryStatus,
+    discover_code_search_candidates,
     find_plugins,
 )
 from nomad_plugins.github import (
+    GitHubError,
     GitHubRepositorySummary,
     GitHubSearchDiagnostics,
     GitHubSearchResult,
@@ -121,6 +125,43 @@ def test_find_plugins_deduplicates_queries_and_keeps_nested_projects():
         'github.com/example/monorepo#packages/parser',
         'github.com/example/monorepo#packages/schema',
     }
+
+
+def test_code_search_failure_identifies_active_query_and_preserves_cause():
+    secondary_query = 'nomad-lab in:file filename:pyproject.toml'
+    primary_diagnostics = GitHubSearchDiagnostics(
+        query=PRIMARY_CODE_SEARCH_QUERY,
+        total_count=0,
+        fetched_count=0,
+        page_count=1,
+        incomplete_results=False,
+        result_limit_reached=False,
+    )
+    original_error = GitHubError('GitHub API request failed with HTTP 503')
+    github_client = SimpleNamespace(
+        search_code=AsyncMock(
+            side_effect=[
+                GitHubSearchResult(items=[], diagnostics=primary_diagnostics),
+                original_error,
+            ]
+        )
+    )
+    config = CatalogueConfig(
+        github=GitHubDiscoveryConfig(
+            code_search_queries=[PRIMARY_CODE_SEARCH_QUERY, secondary_query],
+            code_search_request_delay_seconds=1,
+        )
+    )
+
+    with pytest.raises(GitHubError) as exc_info:
+        asyncio.run(discover_code_search_candidates(github_client, config))
+
+    assert f'query {secondary_query!r}' in str(exc_info.value)
+    assert exc_info.value.__cause__ is original_error
+    assert github_client.search_code.await_args_list == [
+        call(PRIMARY_CODE_SEARCH_QUERY, request_delay_seconds=1.0),
+        call(secondary_query, request_delay_seconds=1.0),
+    ]
 
 
 def _plugin(plugin_id: str) -> Plugin:

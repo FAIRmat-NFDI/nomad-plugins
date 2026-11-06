@@ -1,4 +1,5 @@
 import asyncio
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -44,6 +45,33 @@ def test_code_search_uses_max_page_size_without_obsolete_sorting():
                 return await client.search_code('query')
 
     assert asyncio.run(run_search()).items == []
+
+
+def test_code_search_pacing_applies_across_queries():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                'total_count': 0,
+                'incomplete_results': False,
+                'items': [],
+            },
+        )
+
+    async def run_searches():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            async with GitHubClient('secret', client=http) as client:
+                await client.search_code('first', request_delay_seconds=6.5)
+                await client.search_code('second', request_delay_seconds=6.5)
+
+    with patch(
+        'nomad_plugins.github.asyncio.sleep',
+        new=AsyncMock(),
+    ) as sleep:
+        asyncio.run(run_searches())
+
+    sleep.assert_awaited_once_with(6.5)
 
 
 def test_code_search_paginates_and_reports_diagnostics():
@@ -170,6 +198,7 @@ def test_code_search_rejects_incomplete_or_capped_results(
         asyncio.run(run_search())
 
     assert exc_info.value.diagnostics.total_count == total_count
+    assert "query 'query'" in str(exc_info.value)
 
 
 @pytest.mark.parametrize('status_code', [429, 503])

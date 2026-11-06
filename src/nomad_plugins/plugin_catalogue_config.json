@@ -1,0 +1,9 @@
+{
+  "github": {
+    "codeSearchQueries": [
+      "nomad.plugin in:file filename:pyproject.toml",
+      "nomad-lab in:file filename:pyproject.toml"
+    ],
+    "codeSearchRequestDelaySeconds": 6.5
+  }
+}

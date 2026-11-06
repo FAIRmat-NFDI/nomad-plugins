@@ -10,7 +10,8 @@ A standalone catalogue generator for discovering NOMAD plugins.
 ## Using the catalogue generator
 
 The `plugin-catalogue` CLI crawls public GitHub repositories for Python packages
-that expose NOMAD plugin entry points and writes the discovered metadata as JSON.
+that expose NOMAD plugin entry points or depend on NOMAD, and writes the discovered
+metadata as JSON.
 
 ### Running the crawler
 
@@ -20,21 +21,20 @@ Install the package with e.g. pip:
 pip install nomad-plugins
 ```
 
-and run the crawler export:
+Inspect the packaged discovery queries without contacting GitHub:
 
 ```
-Usage: plugin-catalogue crawl [OPTIONS]
-
-  Crawl plugin metadata and write a catalogue snapshot as JSON.
-
-Options:
-  --github-token TEXT  Your GitHub personal access token to use when querying
-                       for plugins.
-  --output FILE        Path where the catalogue snapshot JSON should be written.
-                       [required]
-  --help               Show this message and exit.
+plugin-catalogue queries
 ```
 
+Run the crawler export:
+
+```
+plugin-catalogue crawl --github-token <token> --output plugins.json
+```
+
+Both commands accept `--config <path>` to override the packaged
+`plugin_catalogue_config.json`.
 
 ## Main contributors
 | Name | E-mail     |

@@ -50,7 +50,10 @@ class GitHubSearchIncompleteError(GitHubError):
                 f'{diagnostics.total_count} reported results'
             )
         reason = '; '.join(reasons) or 'search completeness could not be verified'
-        super().__init__(f'GitHub code search is incomplete: {reason}.')
+        super().__init__(
+            f'GitHub code search is incomplete for query '
+            f'{diagnostics.query!r}: {reason}.'
+        )
 
 
 class GitHubOwner(BaseModel):
@@ -127,6 +130,7 @@ class GitHubClient:
         self.base_url = base_url.rstrip('/')
         self._client = client
         self._owns_client = client is None
+        self._code_search_request_made = False
 
     async def __aenter__(self) -> GitHubClient:
         if self._client is None:
@@ -143,9 +147,12 @@ class GitHubClient:
         query: str,
         *,
         per_page: int = DEFAULT_PER_PAGE,
+        request_delay_seconds: float = 0,
     ) -> GitHubSearchResult:
         if per_page < 1 or per_page > 100:  # noqa: PLR2004
             raise ValueError('GitHub search per_page must be between 1 and 100.')
+        if request_delay_seconds < 0:
+            raise ValueError('GitHub search request delay must be non-negative.')
 
         items: list[GitHubSearchResultItem] = []
         total_count = 0
@@ -157,6 +164,7 @@ class GitHubClient:
 
         while page_count == 0 or len(items) < expected_count:
             page_count += 1
+            await self._pace_code_search(request_delay_seconds)
             response = await self._request(
                 'GET',
                 f'{self.base_url}/search/code',
@@ -199,6 +207,11 @@ class GitHubClient:
             raise GitHubSearchIncompleteError(diagnostics)
 
         return GitHubSearchResult(items=items, diagnostics=diagnostics)
+
+    async def _pace_code_search(self, request_delay_seconds: float) -> None:
+        if self._code_search_request_made and request_delay_seconds:
+            await asyncio.sleep(request_delay_seconds)
+        self._code_search_request_made = True
 
     async def fetch_text(self, url: str) -> str:
         response = await self._request(

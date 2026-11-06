@@ -117,6 +117,9 @@ package-dir = { "" = "src" }
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+nomad_plugins = ["plugin_catalogue_config.json"]
+
 [tool.setuptools_scm]
 
 [tool.cruft]

@@ -1,5 +1,6 @@
 import asyncio
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -33,6 +34,7 @@ from nomad_plugins.pyproject import (
     PluginEntryPoint,
     PyProjectError,
     PyProjectTOML,
+    has_nomad_ecosystem_signal,
     parse_pyproject,
     parse_requirement_name,
     project_path_from_pyproject_path,
@@ -132,6 +134,28 @@ class CrawlResult:
     plugins: list[Plugin]
     search_diagnostics: list[GitHubSearchDiagnostics]
     unique_candidate_count: int
+    repository_search_diagnostics: list['RepositoryQueryDiagnostics'] = field(
+        default_factory=list
+    )
+
+
+@dataclass(frozen=True)
+class RepositoryQueryDiagnostics:
+    search: GitHubSearchDiagnostics
+    considered_count: int
+    accepted_count: int
+    existing_candidate_count: int
+    excluded_count: int
+    missing_pyproject_count: int
+    invalid_pyproject_count: int
+    no_signal_count: int
+
+
+@dataclass(frozen=True)
+class RepositoryDiscoveryResult:
+    candidates: list[GitHubSearchResultItem]
+    projects: dict[tuple[str, str], PyProjectTOML]
+    diagnostics: list[RepositoryQueryDiagnostics]
 
 
 class OasisURLs(Enum):
@@ -203,9 +227,11 @@ async def get_plugin(  # noqa: PLR0913
     repository: GitHubRepositoryDetails,
     central_plugins: set[str],
     example_oasis_plugins: set[str],
+    project: PyProjectTOML | None = None,
 ) -> Plugin | None:
     """Build one public plugin record from a discovered pyproject."""
-    project = await get_toml_project(item, github_client)
+    if project is None:
+        project = await get_toml_project(item, github_client)
     if project is None:
         return None
 
@@ -292,7 +318,7 @@ async def find_plugins(
     config: CatalogueConfig | None = None,
     github_client: GitHubClient | None = None,
 ) -> CrawlResult:
-    """Find and retrieve NOMAD plugins with the configured code searches."""
+    """Find NOMAD projects with the configured code and repository searches."""
     catalogue_config = config or load_catalogue_config()
     if github_client is not None:
         return await _find_plugins(github_client, catalogue_config)
@@ -342,6 +368,107 @@ def code_search_candidate_key(item: GitHubSearchResultItem) -> tuple[str, str]:
     return (item.repository.full_name.casefold(), project_path or '')
 
 
+async def probe_repository_project(
+    github_client: GitHubClient,
+    repository_name: str,
+) -> tuple[PyProjectTOML | None, str]:
+    try:
+        content = await github_client.fetch_root_pyproject(repository_name)
+    except GitHubError as exc:
+        raise GitHubError(
+            f'Root pyproject probe failed for repository {repository_name!r}: {exc}'
+        ) from exc
+    if content is None:
+        return None, 'missing'
+    try:
+        project = parse_pyproject(content)
+    except PyProjectError as exc:
+        click.echo(f'Invalid root pyproject.toml in {repository_name}: {exc}', err=True)
+        return None, 'invalid'
+    if not has_nomad_ecosystem_signal(project):
+        return None, 'no_signal'
+    return project, 'accepted'
+
+
+async def discover_repository_search_candidates(
+    github_client: GitHubClient,
+    config: CatalogueConfig,
+    code_candidates: list[GitHubSearchResultItem],
+) -> RepositoryDiscoveryResult:
+    """Probe new roots once and report outcomes for each overlapping query."""
+    existing_keys = {code_search_candidate_key(item) for item in code_candidates}
+    excluded = {name.casefold() for name in EXCLUDED_REPOS}
+    candidates: dict[tuple[str, str], GitHubSearchResultItem] = {}
+    projects: dict[tuple[str, str], PyProjectTOML] = {}
+    probes: dict[str, tuple[PyProjectTOML | None, str]] = {}
+    diagnostics: list[RepositoryQueryDiagnostics] = []
+
+    for query in config.github.repository_search_queries:
+        try:
+            result = await github_client.search_repositories(
+                query,
+                candidate_limit=config.github.repository_search_candidate_limit,
+                request_delay_seconds=(
+                    config.github.repository_search_request_delay_seconds
+                ),
+            )
+        except GitHubSearchIncompleteError:
+            raise
+        except GitHubError as exc:
+            raise GitHubError(
+                f'GitHub repository search failed for query {query!r}: {exc}'
+            ) from exc
+
+        outcomes: Counter[str] = Counter()
+        for repository in result.items:
+            name = repository.full_name.casefold()
+            key = (name, '')
+            if name in excluded:
+                outcomes['excluded'] += 1
+                continue
+            if key in existing_keys:
+                outcomes['existing'] += 1
+                continue
+            if name not in probes:
+                probes[name] = await probe_repository_project(
+                    github_client, repository.full_name
+                )
+            project, outcome = probes[name]
+            outcomes[outcome] += 1
+            if project is not None:
+                candidates.setdefault(
+                    key,
+                    GitHubSearchResultItem(
+                        path='pyproject.toml',
+                        url=(
+                            f'{github_client.base_url}/repos/{repository.full_name}'
+                            '/contents/pyproject.toml'
+                        ),
+                        repository=repository,
+                    ),
+                )
+                projects[key] = project
+
+        diagnostics.append(
+            RepositoryQueryDiagnostics(
+                search=result.diagnostics,
+                considered_count=len(result.items),
+                accepted_count=outcomes['accepted'],
+                existing_candidate_count=outcomes['existing'],
+                excluded_count=outcomes['excluded'],
+                missing_pyproject_count=outcomes['missing'],
+                invalid_pyproject_count=outcomes['invalid'],
+                no_signal_count=outcomes['no_signal'],
+            )
+        )
+
+    return RepositoryDiscoveryResult(
+        candidates=[candidates[key] for key in sorted(candidates)],
+        projects=projects,
+        diagnostics=diagnostics,
+    )
+
+
 async def _find_plugins(
     github_client: GitHubClient,
     config: CatalogueConfig,
@@ -355,22 +482,34 @@ async def _find_plugins(
         search_task,
     )
     search_items, search_diagnostics = search_data
-    repository_names = sorted(
-        {item.repository.full_name for item in search_items},
-        key=str.casefold,
+    repository_discovery = await discover_repository_search_candidates(
+        github_client, config, search_items
     )
+    candidates = {
+        code_search_candidate_key(item): item
+        for item in [*search_items, *repository_discovery.candidates]
+    }
+    search_items = [candidates[key] for key in sorted(candidates)]
+    repository_names = {
+        item.repository.full_name.casefold(): item.repository.full_name
+        for item in search_items
+    }
     repository_details = await asyncio.gather(
-        *(github_client.fetch_repository(name) for name in repository_names)
+        *(
+            github_client.fetch_repository(repository_names[key])
+            for key in sorted(repository_names)
+        )
     )
-    repositories = dict(zip(repository_names, repository_details, strict=True))
+    repositories = dict(zip(sorted(repository_names), repository_details, strict=True))
 
     tasks = [
         get_plugin(
             item=item,
             github_client=github_client,
-            repository=repositories[item.repository.full_name],
+            repository=repositories[item.repository.full_name.casefold()],
             central_plugins=central_plugins,
             example_oasis_plugins=example_oasis_plugins,
+            project=repository_discovery.projects.get(code_search_candidate_key(item)),
         )
         for item in search_items
     ]
@@ -390,4 +529,5 @@ async def _find_plugins(
         plugins=[plugins[plugin_id] for plugin_id in sorted(plugins)],
         search_diagnostics=search_diagnostics,
         unique_candidate_count=len(search_items),
+        repository_search_diagnostics=repository_discovery.diagnostics,
     )

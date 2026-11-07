@@ -51,6 +51,30 @@ def crawl(config_path: Path | None, github_token: str, output: Path) -> None:
             f'{diagnostics.page_count} page(s); latest reported total: '
             f'{diagnostics.total_count}.'
         )
+    for query_diagnostics in result.repository_search_diagnostics:
+        diagnostics = query_diagnostics.search
+        click.echo(
+            f'GitHub repository search {diagnostics.query!r}: received '
+            f'{diagnostics.fetched_count} result item(s) across '
+            f'{diagnostics.page_count} page(s); latest reported total: '
+            f'{diagnostics.total_count}; considered: '
+            f'{query_diagnostics.considered_count}; accepted: '
+            f'{query_diagnostics.accepted_count}; existing code candidates: '
+            f'{query_diagnostics.existing_candidate_count}; excluded: '
+            f'{query_diagnostics.excluded_count}; missing root pyproject: '
+            f'{query_diagnostics.missing_pyproject_count}; invalid pyproject: '
+            f'{query_diagnostics.invalid_pyproject_count}; no NOMAD signal: '
+            f'{query_diagnostics.no_signal_count}; '
+            f'candidate cap reached: {diagnostics.candidate_limit_reached}; '
+            f'GitHub result window exceeded: {diagnostics.result_limit_reached}; '
+            f'incomplete_results: {diagnostics.incomplete_results}.'
+        )
+        if diagnostics.candidate_limit_reached or diagnostics.result_limit_reached:
+            click.echo(
+                f'Warning: repository search {diagnostics.query!r} is bounded; '
+                'these results are not an exhaustive repository inventory.',
+                err=True,
+            )
     click.echo(f'Unique pyproject.toml candidates: {result.unique_candidate_count}.')
     click.echo(f'Wrote {len(result.plugins)} plugins to {output}')
 
@@ -63,7 +87,7 @@ def crawl(config_path: Path | None, github_token: str, output: Path) -> None:
     help='Optional path to a catalogue configuration JSON file.',
 )
 def queries(config_path: Path | None) -> None:
-    """Print the effective GitHub code-search configuration."""
+    """Print the effective GitHub discovery configuration."""
     try:
         config = load_catalogue_config(config_path)
     except Exception as exc:

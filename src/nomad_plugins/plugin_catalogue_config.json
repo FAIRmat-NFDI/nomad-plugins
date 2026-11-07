@@ -4,6 +4,20 @@
       "nomad.plugin in:file filename:pyproject.toml",
       "nomad-lab in:file filename:pyproject.toml"
     ],
-    "codeSearchRequestDelaySeconds": 6.5
+    "codeSearchRequestDelaySeconds": 6.5,
+    "repositorySearchQueries": [
+      "nomad plugin in:name,description",
+      "topic:nomad-plugin",
+      "topic:north-tool",
+      "nomad-semantic in:name,description",
+      "nomad-measurements in:name,description",
+      "nomad-ientrance in:name,description",
+      "nomad-parser in:name,description",
+      "nomad-schema in:name,description",
+      "org:FAIRmat-NFDI nomad in:name,description",
+      "org:nomad-coe nomad in:name,description"
+    ],
+    "repositorySearchCandidateLimit": 120,
+    "repositorySearchRequestDelaySeconds": 2.1
   }
 }

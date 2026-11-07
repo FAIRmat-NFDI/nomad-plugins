@@ -23,6 +23,7 @@ from pydantic import (
 from nomad_plugins.transform import (
     PluginType,
     infer_entrypoint_type,
+    normalize_dependency_name,
     normalize_plugin_type,
 )
 
@@ -91,6 +92,7 @@ class PyProjectTOML(BaseModel):
     entry_points: EntryPoints = Field(default_factory=EntryPoints, alias='entry-points')
     project_path: str | None = None
     parsing_warnings: list[str] = Field(default_factory=list)
+    has_nomad_entry_point_group: bool = False
 
 
 def parse_pyproject(
@@ -109,6 +111,7 @@ def parse_pyproject(
         raise PyProjectError('pyproject.toml must contain a [project] table.')
 
     diagnostics: list[str] = []
+    entry_point_groups = project.get('entry-points')
     parsed_project = {
         **project,
         'all_dependencies': _parse_dependencies(project, diagnostics),
@@ -116,12 +119,24 @@ def parse_pyproject(
         'urls': _parse_project_urls(project.get('urls'), diagnostics),
         'project_path': project_path_from_pyproject_path(pyproject_path),
         'parsing_warnings': diagnostics,
+        'has_nomad_entry_point_group': (
+            isinstance(entry_point_groups, dict)
+            and isinstance(entry_point_groups.get(NOMAD_ENTRY_POINT_GROUP), dict)
+        ),
     }
 
     try:
         return PyProjectTOML.model_validate(parsed_project)
     except ValidationError as error:
         raise PyProjectError(f'Invalid PEP 621 project metadata: {error}') from error
+
+
+def has_nomad_ecosystem_signal(project: PyProjectTOML) -> bool:
+    """Require a NOMAD entry-point table or an actual NOMAD dependency."""
+    return project.has_nomad_entry_point_group or any(
+        normalize_dependency_name(name) == 'nomad-lab'
+        for name in project.all_dependencies
+    )
 
 
 def parse_requirement_name(

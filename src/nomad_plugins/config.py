@@ -7,6 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 PRIMARY_CODE_SEARCH_QUERY = 'nomad.plugin in:file filename:pyproject.toml'
 DEFAULT_CONFIG_RESOURCE = 'plugin_catalogue_config.json'
 DEFAULT_CODE_SEARCH_REQUEST_DELAY_SECONDS = 6.5
+DEFAULT_REPOSITORY_SEARCH_REQUEST_DELAY_SECONDS = 2.1
+DEFAULT_REPOSITORY_SEARCH_CANDIDATE_LIMIT = 120
 
 
 class GitHubDiscoveryConfig(BaseModel):
@@ -18,6 +20,38 @@ class GitHubDiscoveryConfig(BaseModel):
         alias='codeSearchRequestDelaySeconds',
         ge=0,
     )
+    repository_search_queries: list[str] = Field(
+        default_factory=list, alias='repositorySearchQueries'
+    )
+    repository_search_candidate_limit: int = Field(
+        default=DEFAULT_REPOSITORY_SEARCH_CANDIDATE_LIMIT,
+        alias='repositorySearchCandidateLimit',
+        strict=True,
+        ge=1,
+        le=1000,
+    )
+    repository_search_request_delay_seconds: float = Field(
+        default=DEFAULT_REPOSITORY_SEARCH_REQUEST_DELAY_SECONDS,
+        alias='repositorySearchRequestDelaySeconds',
+        ge=0,
+        allow_inf_nan=False,
+    )
+
+    @field_validator('repository_search_queries', mode='before')
+    @classmethod
+    def validate_repository_queries(cls, value: object) -> object:
+        if not isinstance(value, list):
+            return value
+        if any(not isinstance(query, str) or not query.strip() for query in value):
+            raise ValueError(
+                'github.repositorySearchQueries must contain only non-empty strings.'
+            )
+        queries = [query.strip() for query in value]
+        if len({query.casefold() for query in queries}) != len(queries):
+            raise ValueError(
+                'github.repositorySearchQueries must not contain duplicates.'
+            )
+        return queries
 
     @field_validator('code_search_queries', mode='before')
     @classmethod
@@ -42,12 +76,16 @@ class GitHubDiscoveryConfig(BaseModel):
             raise ValueError('github.codeSearchQueries must not contain duplicates.')
         return queries
 
-    @field_validator('code_search_request_delay_seconds', mode='before')
+    @field_validator(
+        'code_search_request_delay_seconds',
+        'repository_search_request_delay_seconds',
+        mode='before',
+    )
     @classmethod
     def validate_request_delay(cls, value: object) -> object:
         if isinstance(value, bool) or not isinstance(value, int | float):
             raise ValueError(
-                'github.codeSearchRequestDelaySeconds must be a non-negative number.'
+                'GitHub search request delays must be non-negative numbers.'
             )
         return value
 

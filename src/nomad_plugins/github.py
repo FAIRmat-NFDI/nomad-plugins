@@ -4,7 +4,7 @@ import asyncio
 import math
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from pydantic import BaseModel, Field, HttpUrl, ValidationError
@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, HttpUrl, ValidationError
 GITHUB_API_BASE_URL = 'https://api.github.com'
 GITHUB_API_VERSION = '2022-11-28'
 GITHUB_CODE_SEARCH_LIMIT = 1000
+GITHUB_REPOSITORY_SEARCH_LIMIT = 1000
 DEFAULT_PER_PAGE = 100
 DEFAULT_REQUEST_RETRIES = 2
 DEFAULT_REQUEST_TIMEOUT = 30.0
@@ -28,8 +29,12 @@ class GitHubAuthenticationError(GitHubError):
     """Raised when GitHub rejects the configured credentials."""
 
 
+class GitHubNotFoundError(GitHubError):
+    """Raised when a requested GitHub resource returns HTTP 404."""
+
+
 class GitHubSearchIncompleteError(GitHubError):
-    """Raised when GitHub cannot provide a complete code-search result."""
+    """Raised when GitHub cannot provide the requested search result window."""
 
     def __init__(self, diagnostics: GitHubSearchDiagnostics) -> None:
         self.diagnostics = diagnostics
@@ -51,7 +56,7 @@ class GitHubSearchIncompleteError(GitHubError):
             )
         reason = '; '.join(reasons) or 'search completeness could not be verified'
         super().__init__(
-            f'GitHub code search is incomplete for query '
+            f'GitHub {diagnostics.search_type} search is incomplete for query '
             f'{diagnostics.query!r}: {reason}.'
         )
 
@@ -78,6 +83,12 @@ class GitHubCodeSearchPage(BaseModel):
     items: list[GitHubSearchResultItem]
 
 
+class GitHubRepositorySearchPage(BaseModel):
+    total_count: int = Field(ge=0)
+    incomplete_results: bool
+    items: list[GitHubRepositorySummary]
+
+
 class GitHubRepositoryLink(BaseModel):
     html_url: HttpUrl
 
@@ -102,11 +113,19 @@ class GitHubSearchDiagnostics:
     page_count: int
     incomplete_results: bool
     result_limit_reached: bool
+    search_type: Literal['code', 'repository'] = 'code'
+    candidate_limit_reached: bool = False
 
 
 @dataclass(frozen=True)
 class GitHubSearchResult:
     items: list[GitHubSearchResultItem]
+    diagnostics: GitHubSearchDiagnostics
+
+
+@dataclass(frozen=True)
+class GitHubRepositorySearchResult:
+    items: list[GitHubRepositorySummary]
     diagnostics: GitHubSearchDiagnostics
 
 
@@ -131,6 +150,7 @@ class GitHubClient:
         self._client = client
         self._owns_client = client is None
         self._code_search_request_made = False
+        self._repository_search_request_made = False
 
     async def __aenter__(self) -> GitHubClient:
         if self._client is None:
@@ -213,6 +233,80 @@ class GitHubClient:
             await asyncio.sleep(request_delay_seconds)
         self._code_search_request_made = True
 
+    async def search_repositories(
+        self,
+        query: str,
+        *,
+        candidate_limit: int,
+        per_page: int = DEFAULT_PER_PAGE,
+        request_delay_seconds: float = 0,
+    ) -> GitHubRepositorySearchResult:
+        """Fetch an explicitly bounded repository-search window."""
+        if not 1 <= candidate_limit <= GITHUB_REPOSITORY_SEARCH_LIMIT:
+            raise ValueError('Repository candidate limit must be between 1 and 1000.')
+        if not 1 <= per_page <= DEFAULT_PER_PAGE:
+            raise ValueError('GitHub search per_page must be between 1 and 100.')
+        if not math.isfinite(request_delay_seconds) or request_delay_seconds < 0:
+            raise ValueError(
+                'GitHub search request delay must be finite and non-negative.'
+            )
+
+        # Keep page size constant: changing it on the last page would shift offsets.
+        page_size = min(per_page, candidate_limit)
+        items: list[GitHubRepositorySummary] = []
+        total_count = 0
+        page_count = 0
+        result_limit_reached = False
+        expected_count = candidate_limit
+        while len(items) < expected_count:
+            page_count += 1
+            if self._repository_search_request_made and request_delay_seconds:
+                await asyncio.sleep(request_delay_seconds)
+            self._repository_search_request_made = True
+            response = await self._request(
+                'GET',
+                f'{self.base_url}/search/repositories',
+                params={'q': query, 'per_page': page_size, 'page': page_count},
+            )
+            page = self._validate_response(GitHubRepositorySearchPage, response)
+            total_count = page.total_count
+            result_limit_reached = (
+                result_limit_reached or total_count > GITHUB_REPOSITORY_SEARCH_LIMIT
+            )
+            expected_count = min(total_count, candidate_limit)
+            items.extend(page.items)
+            exhausted_early = not page.items and len(items) < expected_count
+            diagnostics = GitHubSearchDiagnostics(
+                query=query,
+                total_count=total_count,
+                fetched_count=len(items),
+                page_count=page_count,
+                incomplete_results=page.incomplete_results,
+                result_limit_reached=result_limit_reached,
+                search_type='repository',
+                candidate_limit_reached=(
+                    len(items) >= candidate_limit and total_count > candidate_limit
+                )
+                or len(items) > candidate_limit,
+            )
+            if page.incomplete_results or exhausted_early:
+                raise GitHubSearchIncompleteError(diagnostics)
+            if not page.items:
+                break
+
+        return GitHubRepositorySearchResult(
+            items=items[:candidate_limit], diagnostics=diagnostics
+        )
+
+    async def fetch_root_pyproject(self, repository_full_name: str) -> str | None:
+        """Probe the default branch; only a missing root file is a normal exclusion."""
+        try:
+            return await self.fetch_text(
+                f'{self.base_url}/repos/{repository_full_name}/contents/pyproject.toml'
+            )
+        except GitHubNotFoundError:
+            return None
+
     async def fetch_text(self, url: str) -> str:
         response = await self._request(
             'GET',
@@ -279,7 +373,12 @@ class GitHubClient:
                 continue
 
             detail = self._response_error_detail(response)
-            raise GitHubError(
+            error_type = (
+                GitHubNotFoundError
+                if response.status_code == httpx.codes.NOT_FOUND
+                else GitHubError
+            )
+            raise error_type(
                 f'GitHub API request failed with HTTP {response.status_code}'
                 f'{detail}: {method} {url}'
             )

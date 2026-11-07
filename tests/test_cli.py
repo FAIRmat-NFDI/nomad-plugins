@@ -5,8 +5,14 @@ from click.testing import CliRunner
 
 from nomad_plugins.catalogue import CatalogueSnapshot
 from nomad_plugins.cli import main
-from nomad_plugins.config import PRIMARY_CODE_SEARCH_QUERY
-from nomad_plugins.crawler import CrawlResult, DeploymentInfo, Plugin, RepositoryStatus
+from nomad_plugins.config import PRIMARY_CODE_SEARCH_QUERY, load_catalogue_config
+from nomad_plugins.crawler import (
+    CrawlResult,
+    DeploymentInfo,
+    Plugin,
+    RepositoryQueryDiagnostics,
+    RepositoryStatus,
+)
 from nomad_plugins.github import GitHubSearchDiagnostics, GitHubSearchIncompleteError
 from nomad_plugins.pyproject import PluginEntryPoint
 
@@ -222,15 +228,10 @@ def test_queries_prints_packaged_configuration_without_credentials():
     result = CliRunner().invoke(main, ['queries'])
 
     assert result.exit_code == 0, result.output
-    assert json.loads(result.output) == {
-        'github': {
-            'codeSearchQueries': [
-                PRIMARY_CODE_SEARCH_QUERY,
-                'nomad-lab in:file filename:pyproject.toml',
-            ],
-            'codeSearchRequestDelaySeconds': 6.5,
-        }
-    }
+    assert json.loads(result.output) == load_catalogue_config().model_dump(
+        by_alias=True
+    )
+    assert 'repositorySearchQueries' in result.output
 
 
 def test_crawl_accepts_custom_configuration(tmp_path):
@@ -269,3 +270,53 @@ def test_crawl_accepts_custom_configuration(tmp_path):
     config = find_plugins.await_args.kwargs['config']
     assert config.github.code_search_queries == [PRIMARY_CODE_SEARCH_QUERY]
     assert config.github.code_search_request_delay_seconds == 0
+
+
+def test_crawl_reports_bounded_repository_search_and_probe_outcomes(tmp_path):
+    crawl_result = _crawl_result([])
+    crawl_result.repository_search_diagnostics.append(
+        RepositoryQueryDiagnostics(
+            search=GitHubSearchDiagnostics(
+                query='topic:north-tool',
+                total_count=2000,
+                fetched_count=100,
+                page_count=1,
+                incomplete_results=False,
+                result_limit_reached=True,
+                search_type='repository',
+                candidate_limit_reached=True,
+            ),
+            considered_count=5,
+            accepted_count=1,
+            existing_candidate_count=1,
+            excluded_count=0,
+            missing_pyproject_count=1,
+            invalid_pyproject_count=1,
+            no_signal_count=1,
+        )
+    )
+    with patch(
+        'nomad_plugins.cli.find_plugins', new=AsyncMock(return_value=crawl_result)
+    ):
+        result = CliRunner().invoke(
+            main,
+            [
+                'crawl',
+                '--github-token',
+                'token',
+                '--output',
+                str(tmp_path / 'out.json'),
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    assert "GitHub repository search 'topic:north-tool'" in result.output
+    assert 'latest reported total: 2000' in result.output
+    assert 'accepted: 1' in result.output
+    assert 'existing code candidates: 1' in result.output
+    assert 'missing root pyproject: 1' in result.output
+    assert 'invalid pyproject: 1' in result.output
+    assert 'no NOMAD signal: 1' in result.output
+    assert 'candidate cap reached: True' in result.output
+    assert 'GitHub result window exceeded: True' in result.output
+    assert 'incomplete_results: False' in result.output
+    assert 'not an exhaustive repository inventory' in result.stderr

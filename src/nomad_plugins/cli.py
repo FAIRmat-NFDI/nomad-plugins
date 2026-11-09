@@ -6,7 +6,7 @@ import click
 
 from nomad_plugins.catalogue import build_catalogue_snapshot, write_catalogue_snapshot
 from nomad_plugins.config import load_catalogue_config
-from nomad_plugins.crawler import find_plugins
+from nomad_plugins.crawler import Plugin, SearchCandidateAudit, find_plugins
 
 
 @click.group()
@@ -34,7 +34,17 @@ def main() -> None:
     type=click.Path(path_type=Path, dir_okay=False),
     help='Path where the catalogue snapshot JSON should be written.',
 )
-def crawl(config_path: Path | None, github_token: str, output: Path) -> None:
+@click.option(
+    '--audit-searches',
+    is_flag=True,
+    help='List each search result, its discovery outcome, and final project kind.',
+)
+def crawl(
+    config_path: Path | None,
+    github_token: str,
+    output: Path,
+    audit_searches: bool,
+) -> None:
     """Crawl plugin metadata and write a catalogue snapshot as JSON."""
     try:
         config = load_catalogue_config(config_path)
@@ -44,13 +54,17 @@ def crawl(config_path: Path | None, github_token: str, output: Path) -> None:
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
 
-    for diagnostics in result.search_diagnostics:
+    plugins_by_id = {plugin.id.casefold(): plugin for plugin in result.plugins}
+    for query_diagnostics in result.search_diagnostics:
+        diagnostics = query_diagnostics.search
         click.echo(
             f'GitHub code search {diagnostics.query!r}: received '
             f'{diagnostics.fetched_count} result item(s) across '
             f'{diagnostics.page_count} page(s); latest reported total: '
             f'{diagnostics.total_count}.'
         )
+        if audit_searches:
+            _print_search_audit(query_diagnostics.candidates, plugins_by_id)
     for query_diagnostics in result.repository_search_diagnostics:
         diagnostics = query_diagnostics.search
         click.echo(
@@ -75,8 +89,26 @@ def crawl(config_path: Path | None, github_token: str, output: Path) -> None:
                 'these results are not an exhaustive repository inventory.',
                 err=True,
             )
+        if audit_searches:
+            _print_search_audit(query_diagnostics.candidates, plugins_by_id)
     click.echo(f'Unique pyproject.toml candidates: {result.unique_candidate_count}.')
     click.echo(f'Wrote {len(result.plugins)} plugins to {output}')
+
+
+def _print_search_audit(
+    candidates: tuple[SearchCandidateAudit, ...],
+    plugins_by_id: dict[str, Plugin],
+) -> None:
+    click.echo(f'  Candidate audit ({len(candidates)} result item(s)):')
+    for candidate in sorted(
+        candidates,
+        key=lambda entry: (entry.outcome, entry.candidate.casefold()),
+    ):
+        plugin = plugins_by_id.get(candidate.candidate.casefold())
+        final_status = (
+            f'exported as {plugin.project_kind}' if plugin else 'not exported'
+        )
+        click.echo(f'    {candidate.outcome}: {candidate.candidate} ({final_status})')
 
 
 @main.command()

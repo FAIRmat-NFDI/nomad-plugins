@@ -19,6 +19,9 @@ plugin-catalogue crawl --github-token <token> --output plugins.json
 ```
 
 Pass `--config <path>` to either command to override the packaged configuration.
+Add `--audit-searches` to a crawl to print every code- and repository-search
+result with its per-query outcome and, when present, the final exported project
+kind. This audit is CLI output only; it does not change the catalogue JSON.
 
 ## Configure repository discovery
 
@@ -57,6 +60,17 @@ number of candidates considered, accepted roots, existing code candidates,
 and exclusions split into missing files, invalid metadata, absent NOMAD
 signals, and excluded repositories. Counts are per query: an overlapping root
 can appear in several query reports but only once in the final snapshot.
+The optional candidate audit makes those overlaps visible by stable ID. For
+repository search, `accepted_new` means the root passed the NOMAD signal check
+and was not contributed by an earlier query; `accepted_overlap` means an earlier
+repository query had already accepted it. `existing_code_candidate` means code
+search had already found its root, so repository search did not re-probe it.
+For code search, `new_candidate` and `overlap` describe candidate discovery,
+before parsing; `not exported` identifies a candidate that did not become a
+catalogue record. Rejection outcomes such as `missing`, `invalid`, and
+`no_signal` are listed with their repository IDs. Audit lines are sorted within
+each query for reproducibility, while GitHub's search results and totals may
+change between crawls.
 
 Candidate limits apply before filtering and deduplication; rejected or already
 known candidates do not free slots in the query's result window. A final page

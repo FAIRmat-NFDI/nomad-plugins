@@ -116,9 +116,19 @@ def test_find_plugins_deduplicates_queries_and_keeps_nested_projects():
         'https://api.github.test/contents/parser-primary',
         'https://api.github.test/contents/schema',
     }
-    assert result.search_diagnostics == [
+    assert [diagnostics.search for diagnostics in result.search_diagnostics] == [
         primary_diagnostics,
         secondary_diagnostics,
+    ]
+    assert [
+        [(item.candidate, item.outcome) for item in diagnostics.candidates]
+        for diagnostics in result.search_diagnostics
+    ] == [
+        [('github.com/example/monorepo#packages/parser', 'new_candidate')],
+        [
+            ('github.com/example/monorepo#packages/parser', 'overlap'),
+            ('github.com/example/monorepo#packages/schema', 'new_candidate'),
+        ],
     ]
     assert result.unique_candidate_count == expected_candidate_count
     assert {plugin.id for plugin in result.plugins} == {
@@ -161,6 +171,57 @@ def test_code_search_failure_identifies_active_query_and_preserves_cause():
     assert github_client.search_code.await_args_list == [
         call(PRIMARY_CODE_SEARCH_QUERY, request_delay_seconds=1.0),
         call(secondary_query, request_delay_seconds=1.0),
+    ]
+
+
+def test_code_search_audit_records_exclusions_and_invalid_paths():
+    excluded_repository = GitHubRepositorySummary(
+        full_name='FAIRmat-NFDI/cookiecutter-nomad-plugin',
+        html_url='https://github.com/FAIRmat-NFDI/cookiecutter-nomad-plugin',
+    )
+    repository = GitHubRepositorySummary(
+        full_name='example/plugin',
+        html_url='https://github.com/example/plugin',
+    )
+    items = [
+        GitHubSearchResultItem(
+            path='pyproject.toml',
+            url='https://api.github.test/excluded/pyproject.toml',
+            repository=excluded_repository,
+        ),
+        GitHubSearchResultItem(
+            path='README.md',
+            url='https://api.github.test/invalid/README.md',
+            repository=repository,
+        ),
+    ]
+    github_client = SimpleNamespace(
+        search_code=AsyncMock(
+            return_value=GitHubSearchResult(
+                items=items,
+                diagnostics=GitHubSearchDiagnostics(
+                    query=PRIMARY_CODE_SEARCH_QUERY,
+                    total_count=2,
+                    fetched_count=2,
+                    page_count=1,
+                    incomplete_results=False,
+                    result_limit_reached=False,
+                ),
+            )
+        )
+    )
+    config = CatalogueConfig(
+        github=GitHubDiscoveryConfig(code_search_queries=[PRIMARY_CODE_SEARCH_QUERY])
+    )
+
+    candidates, diagnostics = asyncio.run(
+        discover_code_search_candidates(github_client, config)
+    )
+
+    assert candidates == []
+    assert [(item.candidate, item.outcome) for item in diagnostics[0].candidates] == [
+        ('github.com/fairmat-nfdi/cookiecutter-nomad-plugin', 'excluded'),
+        ('https://api.github.test/invalid/README.md', 'invalid_path'),
     ]
 
 

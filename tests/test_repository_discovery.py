@@ -196,6 +196,24 @@ def test_repository_and_code_overlap_reuses_roots_and_keeps_nested_projects(caps
         assert diagnostics.invalid_pyproject_count == 1
         assert diagnostics.no_signal_count == 1
         assert diagnostics.excluded_count == 1
+    first, second = result.repository_search_diagnostics
+    assert {(item.candidate, item.outcome) for item in first.candidates} >= {
+        ('github.com/example/new', 'accepted_new'),
+        ('github.com/example/monorepo', 'existing_code_candidate'),
+        ('github.com/example/missing', 'missing'),
+        ('github.com/example/invalid', 'invalid'),
+        ('github.com/example/unrelated', 'no_signal'),
+    }
+    assert {
+        item.candidate
+        for item in second.candidates
+        if item.outcome == 'accepted_overlap'
+    } == {
+        'github.com/example/new',
+        'github.com/example/empty',
+        'github.com/example/fork',
+        'github.com/example/archived',
+    }
     assert 'Invalid root pyproject.toml in example/invalid' in capsys.readouterr().err
 
 
@@ -296,7 +314,7 @@ def test_repository_failures_preserve_existing_cli_output(tmp_path, failure):
         if request.url.path == '/search/code':
             return _search_response([])
         if request.url.path == '/search/repositories':
-            if request.url.params['q'] == 'nomad plugin in:name,description':
+            if request.url.params['q'] == 'topic:nomad-plugin':
                 return _search_response([])
             if failure == 'http':
                 return httpx.Response(503)
@@ -331,7 +349,7 @@ def test_repository_failures_preserve_existing_cli_output(tmp_path, failure):
     context = (
         "repository 'example/plugin'"
         if failure == 'probe'
-        else "query 'topic:nomad-plugin'"
+        else "query 'topic:north-tool'"
     )
     assert context in result.output
     assert output.read_text(encoding='utf-8') == 'previous snapshot'

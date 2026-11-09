@@ -40,6 +40,8 @@ plugin-catalogue crawl --github-token <token> --output plugins.json
 
 Both commands accept `--config <path>` to override the packaged
 `plugin_catalogue_config.json`.
+Use `--audit-searches` with `crawl` to list each query's candidates, exclusions,
+overlaps, and final exported project kinds without changing the JSON output.
 
 See the [configuration and diagnostics guide](docs/how_to/use_this_plugin.md)
 for repository-search limits and exclusion reporting.

@@ -132,11 +132,34 @@ class Plugin(BaseModel):
 @dataclass(frozen=True)
 class CrawlResult:
     plugins: list[Plugin]
-    search_diagnostics: list[GitHubSearchDiagnostics]
+    search_diagnostics: list['CodeQueryDiagnostics']
     unique_candidate_count: int
     repository_search_diagnostics: list['RepositoryQueryDiagnostics'] = field(
         default_factory=list
     )
+
+
+@dataclass(frozen=True)
+class SearchCandidateAudit:
+    candidate: str
+    outcome: Literal[
+        'new_candidate',
+        'overlap',
+        'excluded',
+        'invalid_path',
+        'existing_code_candidate',
+        'accepted_new',
+        'accepted_overlap',
+        'missing',
+        'invalid',
+        'no_signal',
+    ]
+
+
+@dataclass(frozen=True)
+class CodeQueryDiagnostics:
+    search: GitHubSearchDiagnostics
+    candidates: tuple[SearchCandidateAudit, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -149,6 +172,7 @@ class RepositoryQueryDiagnostics:
     missing_pyproject_count: int
     invalid_pyproject_count: int
     no_signal_count: int
+    candidates: tuple[SearchCandidateAudit, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -330,9 +354,9 @@ async def find_plugins(
 async def discover_code_search_candidates(
     github_client: GitHubClient,
     config: CatalogueConfig,
-) -> tuple[list[GitHubSearchResultItem], list[GitHubSearchDiagnostics]]:
+) -> tuple[list[GitHubSearchResultItem], list[CodeQueryDiagnostics]]:
     candidates: dict[tuple[str, str], GitHubSearchResultItem] = {}
-    diagnostics: list[GitHubSearchDiagnostics] = []
+    diagnostics: list[CodeQueryDiagnostics] = []
     excluded_repositories = {repository.casefold() for repository in EXCLUDED_REPOS}
 
     for query in config.github.code_search_queries:
@@ -347,15 +371,39 @@ async def discover_code_search_candidates(
             raise GitHubError(
                 f'GitHub code search failed for query {query!r}: {exc}'
             ) from exc
-        diagnostics.append(result.diagnostics)
+        candidate_audit: list[SearchCandidateAudit] = []
         for item in result.items:
             if item.repository.full_name.casefold() in excluded_repositories:
+                candidate_audit.append(
+                    SearchCandidateAudit(
+                        candidate=stable_plugin_id(str(item.repository.html_url)),
+                        outcome='excluded',
+                    )
+                )
                 continue
             try:
                 key = code_search_candidate_key(item)
             except PyProjectError:
+                candidate_audit.append(
+                    SearchCandidateAudit(
+                        candidate=str(item.url), outcome='invalid_path'
+                    )
+                )
                 continue
+            candidate_id = stable_plugin_id(str(item.repository.html_url), key[1])
+            candidate_audit.append(
+                SearchCandidateAudit(
+                    candidate=candidate_id,
+                    outcome='overlap' if key in candidates else 'new_candidate',
+                )
+            )
             candidates.setdefault(key, item)
+        diagnostics.append(
+            CodeQueryDiagnostics(
+                search=result.diagnostics,
+                candidates=tuple(candidate_audit),
+            )
+        )
 
     return (
         [candidates[key] for key in sorted(candidates)],
@@ -420,14 +468,20 @@ async def discover_repository_search_candidates(
             ) from exc
 
         outcomes: Counter[str] = Counter()
+        candidate_audit: list[SearchCandidateAudit] = []
         for repository in result.items:
             name = repository.full_name.casefold()
             key = (name, '')
+            candidate_id = stable_plugin_id(str(repository.html_url))
             if name in excluded:
                 outcomes['excluded'] += 1
+                candidate_audit.append(SearchCandidateAudit(candidate_id, 'excluded'))
                 continue
             if key in existing_keys:
                 outcomes['existing'] += 1
+                candidate_audit.append(
+                    SearchCandidateAudit(candidate_id, 'existing_code_candidate')
+                )
                 continue
             if name not in probes:
                 probes[name] = await probe_repository_project(
@@ -436,6 +490,12 @@ async def discover_repository_search_candidates(
             project, outcome = probes[name]
             outcomes[outcome] += 1
             if project is not None:
+                candidate_audit.append(
+                    SearchCandidateAudit(
+                        candidate_id,
+                        'accepted_overlap' if key in candidates else 'accepted_new',
+                    )
+                )
                 candidates.setdefault(
                     key,
                     GitHubSearchResultItem(
@@ -448,6 +508,8 @@ async def discover_repository_search_candidates(
                     ),
                 )
                 projects[key] = project
+            else:
+                candidate_audit.append(SearchCandidateAudit(candidate_id, outcome))
 
         diagnostics.append(
             RepositoryQueryDiagnostics(
@@ -459,6 +521,7 @@ async def discover_repository_search_candidates(
                 missing_pyproject_count=outcomes['missing'],
                 invalid_pyproject_count=outcomes['invalid'],
                 no_signal_count=outcomes['no_signal'],
+                candidates=tuple(candidate_audit),
             )
         )
 

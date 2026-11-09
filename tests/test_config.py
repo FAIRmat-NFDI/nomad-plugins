@@ -30,6 +30,10 @@ def test_packaged_default_config_loads_outside_repository(tmp_path, monkeypatch)
         'org:FAIRmat-NFDI nomad in:name,description',
         'org:nomad-coe nomad in:name,description',
     } <= set(config.github.repository_search_queries)
+    assert (
+        'nomad plugin in:name,description'
+        not in config.github.repository_search_queries
+    )
     assert config.github.repository_search_candidate_limit == 120  # noqa: PLR2004
     assert config.github.repository_search_request_delay_seconds == 2.1  # noqa: PLR2004
 

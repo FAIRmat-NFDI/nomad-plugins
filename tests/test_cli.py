@@ -7,11 +7,13 @@ from nomad_plugins.catalogue import CatalogueSnapshot
 from nomad_plugins.cli import main
 from nomad_plugins.config import PRIMARY_CODE_SEARCH_QUERY, load_catalogue_config
 from nomad_plugins.crawler import (
+    CodeQueryDiagnostics,
     CrawlResult,
     DeploymentInfo,
     Plugin,
     RepositoryQueryDiagnostics,
     RepositoryStatus,
+    SearchCandidateAudit,
 )
 from nomad_plugins.github import GitHubSearchDiagnostics, GitHubSearchIncompleteError
 from nomad_plugins.pyproject import PluginEntryPoint
@@ -55,13 +57,15 @@ def _crawl_result(plugins: list[Plugin]) -> CrawlResult:
     return CrawlResult(
         plugins=plugins,
         search_diagnostics=[
-            GitHubSearchDiagnostics(
-                query=PRIMARY_CODE_SEARCH_QUERY,
-                total_count=len(plugins),
-                fetched_count=len(plugins),
-                page_count=1,
-                incomplete_results=False,
-                result_limit_reached=False,
+            CodeQueryDiagnostics(
+                search=GitHubSearchDiagnostics(
+                    query=PRIMARY_CODE_SEARCH_QUERY,
+                    total_count=len(plugins),
+                    fetched_count=len(plugins),
+                    page_count=1,
+                    incomplete_results=False,
+                    result_limit_reached=False,
+                )
             )
         ],
         unique_candidate_count=len(plugins),
@@ -320,3 +324,85 @@ def test_crawl_reports_bounded_repository_search_and_probe_outcomes(tmp_path):
     assert 'GitHub result window exceeded: True' in result.output
     assert 'incomplete_results: False' in result.output
     assert 'not an exhaustive repository inventory' in result.stderr
+
+
+def test_crawl_search_audit_identifies_candidates_and_final_kinds(tmp_path):
+    output = tmp_path / 'out.json'
+    plugin = _plugin('plugin')
+    dependent = _plugin('dependent').model_copy(
+        update={'project_kind': 'nomad_dependent_package'}
+    )
+    crawl_result = _crawl_result([plugin, dependent])
+    crawl_result.search_diagnostics[0] = CodeQueryDiagnostics(
+        search=crawl_result.search_diagnostics[0].search,
+        candidates=(
+            SearchCandidateAudit('github.com/example/plugin', 'new_candidate'),
+            SearchCandidateAudit('github.com/example/missing', 'new_candidate'),
+        ),
+    )
+    crawl_result.repository_search_diagnostics.append(
+        RepositoryQueryDiagnostics(
+            search=GitHubSearchDiagnostics(
+                query='topic:nomad-plugin',
+                total_count=3,
+                fetched_count=3,
+                page_count=1,
+                incomplete_results=False,
+                result_limit_reached=False,
+                search_type='repository',
+            ),
+            considered_count=3,
+            accepted_count=1,
+            existing_candidate_count=1,
+            excluded_count=0,
+            missing_pyproject_count=1,
+            invalid_pyproject_count=0,
+            no_signal_count=0,
+            candidates=(
+                SearchCandidateAudit('github.com/example/dependent', 'accepted_new'),
+                SearchCandidateAudit(
+                    'github.com/example/plugin', 'existing_code_candidate'
+                ),
+                SearchCandidateAudit('github.com/example/missing', 'missing'),
+            ),
+        )
+    )
+    with patch(
+        'nomad_plugins.cli.find_plugins', new=AsyncMock(return_value=crawl_result)
+    ):
+        result = CliRunner().invoke(
+            main,
+            [
+                'crawl',
+                '--github-token',
+                'token',
+                '--audit-searches',
+                '--output',
+                str(output),
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert (
+        'new_candidate: github.com/example/plugin (exported as plugin)' in result.output
+    )
+    assert 'new_candidate: github.com/example/missing (not exported)' in result.output
+    assert (
+        'accepted_new: github.com/example/dependent '
+        '(exported as nomad_dependent_package)'
+    ) in result.output
+    assert (
+        'existing_code_candidate: github.com/example/plugin (exported as plugin)'
+    ) in result.output
+    assert 'missing: github.com/example/missing (not exported)' in result.output
+    assert 'Candidate audit (' not in output.read_text(encoding='utf-8')
+
+    with patch(
+        'nomad_plugins.cli.find_plugins', new=AsyncMock(return_value=crawl_result)
+    ):
+        ordinary_result = CliRunner().invoke(
+            main,
+            ['crawl', '--github-token', 'token', '--output', str(output)],
+        )
+    assert ordinary_result.exit_code == 0, ordinary_result.output
+    assert 'Candidate audit (' not in ordinary_result.output

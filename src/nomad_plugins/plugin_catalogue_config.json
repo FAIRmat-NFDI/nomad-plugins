@@ -6,7 +6,6 @@
     ],
     "codeSearchRequestDelaySeconds": 6.5,
     "repositorySearchQueries": [
-      "nomad plugin in:name,description",
       "topic:nomad-plugin",
       "topic:north-tool",
       "nomad-semantic in:name,description",

@@ -14,7 +14,31 @@ from nomad_plugins.github import (
     GitHubRepositorySummary,
     GitHubSearchResultItem,
 )
-from nomad_plugins.pyproject import PyProjectError, PyProjectWarning, parse_pyproject
+from nomad_plugins.pyproject import (
+    PyProjectError,
+    PyProjectWarning,
+    has_nomad_ecosystem_signal,
+    parse_pyproject,
+)
+
+
+@pytest.mark.parametrize(
+    ('metadata', 'expected'),
+    [
+        ('[project.entry-points."nomad.plugin"]', True),
+        ('dependencies = ["NOMAD_lab[parsing]>=1"]', True),
+        ('[project.optional-dependencies]\nplugins = ["nomad.lab"]', True),
+        ('dependencies = ["nomad-lab-tools"]', False),
+        ('description = "nomad.plugin and nomad-lab"', False),
+        ('# [project.entry-points."nomad.plugin"]', False),
+        ('[project.urls]\nDocs = "https://nomad-lab.eu"', False),
+    ],
+)
+def test_repository_signal_uses_parsed_structure_and_exact_dependency_names(
+    metadata, expected
+):
+    project = parse_pyproject(f'[project]\nname = "example"\n{metadata}')
+    assert has_nomad_ecosystem_signal(project) is expected
 
 
 def test_parse_complete_nested_pep621_project():

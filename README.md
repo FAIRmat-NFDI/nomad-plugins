@@ -13,6 +13,13 @@ The `plugin-catalogue` CLI crawls public GitHub repositories for Python packages
 that expose NOMAD plugin entry points or depend on NOMAD, and writes the discovered
 metadata as JSON.
 
+Discovery combines GitHub code searches with supplementary repository searches.
+Repository results contribute only root `pyproject.toml` files with a NOMAD
+entry-point table or a `nomad-lab` dependency. Overlapping results are processed
+once; nested projects found by code search remain distinct catalogue entries.
+Reviewed plugin owners also receive separate organization- or user-scoped
+repository searches. Owner membership is a discovery hint, not an endorsement.
+
 ### Running the crawler
 
 Install the package with e.g. pip:
@@ -35,6 +42,11 @@ plugin-catalogue crawl --github-token <token> --output plugins.json
 
 Both commands accept `--config <path>` to override the packaged
 `plugin_catalogue_config.json`.
+Use `--audit-searches` with `crawl` to list each query's candidates, exclusions,
+overlaps, and final exported project kinds without changing the JSON output.
+
+See the [configuration and diagnostics guide](docs/how_to/use_this_plugin.md)
+for repository-search limits and exclusion reporting.
 
 ## Main contributors
 | Name | E-mail     |

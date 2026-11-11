@@ -73,7 +73,7 @@ def _pyproject(name, entrypoint='parser'):
     )
 
 
-def _run_crawl(handler):
+def _run_crawl(handler, config=None):
     async def run():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
             async with GitHubClient(
@@ -83,7 +83,7 @@ def _run_crawl(handler):
                 request_retries=0,
             ) as client:
                 return await find_plugins(
-                    'token', config=_config(), github_client=client
+                    'token', config=config or _config(), github_client=client
                 )
 
     with (
@@ -265,6 +265,153 @@ def test_repository_search_discovers_reviewed_north_tools_and_semantic_service()
         for plugin in result.plugins
         if 'north-' in plugin.name
     )
+
+
+def test_reviewed_organization_and_personal_account_queries_share_discovery_gate():
+    queries = {
+        'topic:nomad-plugin': ['research/known'],
+        'org:research nomad in:name,description': [
+            'research/known',
+            'research/new',
+            'research/unrelated',
+        ],
+        'user:scientist nomad in:name,description': [
+            'scientist/plugin',
+            'scientist/dependent',
+            'scientist/unrelated',
+        ],
+    }
+    projects = {
+        'research/known': _pyproject('known'),
+        'research/new': _pyproject('new'),
+        'research/unrelated': '[project]\nname = "unrelated"',
+        'scientist/plugin': _pyproject('plugin'),
+        'scientist/dependent': (
+            '[project]\nname = "dependent"\ndependencies = ["nomad-lab"]'
+        ),
+        'scientist/unrelated': '[project]\nname = "other"',
+    }
+    requests = Counter()
+
+    def handler(request):
+        path = request.url.path
+        requests[str(request.url)] += 1
+        if path == '/search/code':
+            return _search_response([])
+        if path == '/search/repositories':
+            return _search_response(
+                [_repository(name) for name in queries[request.url.params['q']]]
+            )
+        repository_name = path.removeprefix('/repos/')
+        if '/contents/' in repository_name:
+            repository_name = repository_name.split('/contents/', 1)[0]
+            return httpx.Response(200, text=projects[repository_name])
+        owner = repository_name.split('/', 1)[0]
+        return httpx.Response(
+            200,
+            json={
+                'owner': {
+                    'login': owner,
+                    'type': 'Organization' if owner == 'research' else 'User',
+                },
+                'archived': False,
+                'fork': False,
+                'stargazers_count': 0,
+            },
+        )
+
+    config = CatalogueConfig.model_validate(
+        {
+            'github': {
+                'codeSearchQueries': [PRIMARY_CODE_SEARCH_QUERY],
+                'codeSearchRequestDelaySeconds': 0,
+                'repositorySearchQueries': ['topic:nomad-plugin'],
+                'ownerSearches': [
+                    {'login': 'research', 'ownerType': 'Organization'},
+                    {'login': 'scientist', 'ownerType': 'User'},
+                ],
+                'repositorySearchRequestDelaySeconds': 0,
+            }
+        }
+    )
+    result = _run_crawl(handler, config=config)
+
+    assert [
+        diagnostics.search.query for diagnostics in result.repository_search_diagnostics
+    ] == list(queries)
+    assert {plugin.id: plugin.project_kind for plugin in result.plugins} == {
+        'github.com/research/known': 'plugin',
+        'github.com/research/new': 'plugin',
+        'github.com/scientist/plugin': 'plugin',
+        'github.com/scientist/dependent': 'nomad_dependent_package',
+    }
+    assert all(plugin.registry_visible for plugin in result.plugins)
+    assert result.repository_search_diagnostics[1].accepted_count == 2  # noqa: PLR2004
+    assert result.repository_search_diagnostics[1].no_signal_count == 1
+    assert result.repository_search_diagnostics[2].accepted_count == 2  # noqa: PLR2004
+    assert result.repository_search_diagnostics[2].no_signal_count == 1
+    assert (
+        'github.com/research/known',
+        'accepted_overlap',
+    ) in {
+        (item.candidate, item.outcome)
+        for item in result.repository_search_diagnostics[1].candidates
+    }
+    assert (
+        requests['https://api.github.test/repos/research/known/contents/pyproject.toml']
+        == 1
+    )
+
+
+def test_owner_queries_have_independent_candidate_windows_and_shared_pacing():
+    config = CatalogueConfig.model_validate(
+        {
+            'github': {
+                'codeSearchQueries': [PRIMARY_CODE_SEARCH_QUERY],
+                'ownerSearches': [
+                    {'login': 'research', 'ownerType': 'Organization'},
+                    {'login': 'scientist', 'ownerType': 'User'},
+                ],
+                'repositorySearchCandidateLimit': 1,
+                'repositorySearchRequestDelaySeconds': 2.1,
+            }
+        }
+    )
+    queries: list[str] = []
+
+    def handler(request):
+        if request.url.path == '/search/repositories':
+            query = request.url.params['q']
+            queries.append(query)
+            owner = 'research' if query.startswith('org:') else 'scientist'
+            return httpx.Response(
+                200,
+                json={
+                    'total_count': 2,
+                    'incomplete_results': False,
+                    'items': [_repository(f'{owner}/plugin')],
+                },
+            )
+        return httpx.Response(200, text=_pyproject('plugin'))
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            async with GitHubClient(
+                'token', client=http, base_url='https://api.github.test'
+            ) as client:
+                return await discover_repository_search_candidates(client, config, [])
+
+    with patch('nomad_plugins.github.asyncio.sleep', new=AsyncMock()) as sleep:
+        result = asyncio.run(run())
+
+    assert queries == [
+        'org:research nomad in:name,description',
+        'user:scientist nomad in:name,description',
+    ]
+    assert len(result.candidates) == 2  # noqa: PLR2004
+    assert all(d.search.candidate_limit_reached for d in result.diagnostics)
+    assert all(d.considered_count == 1 for d in result.diagnostics)
+    sleep.assert_awaited_once_with(2.1)
 
 
 def test_second_repository_query_failure_retains_query_and_original_exception():

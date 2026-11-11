@@ -27,20 +27,39 @@ kind. This audit is CLI output only; it does not change the catalogue JSON.
 
 The packaged configuration adds reviewed repository queries for NOMAD plugin
 topics and name families, including NORTH tools and the semantic web service.
+It also includes owner-scoped searches for the organizations and personal
+accounts represented by plugins in the reference catalogue snapshot. Their
+GitHub owner types determine whether an `org:` or `user:` query is used.
 It probes only the root `pyproject.toml` on each repository's default branch.
 Code search continues to discover both root and nested projects.
 
 The `github` configuration accepts:
 
 - `repositorySearchQueries`: a list of unique, non-empty GitHub repository
-  queries. Set it to `[]` to disable supplementary discovery. Custom
-  configurations that omit this setting retain code-search-only behavior.
+  queries. Set it to `[]` to disable targeted repository queries.
+- `ownerSearches`: a reviewed list of `{ "login": "...", "ownerType":
+  "Organization" | "User" }` entries. Each produces a separate
+  `org:<login> nomad in:name,description` or
+  `user:<login> nomad in:name,description` query. Omit or set it to `[]` to
+  disable owner searches. Custom configurations that omit both query lists
+  retain code-search-only behavior.
 - `repositorySearchCandidateLimit`: an integer from 1 to 1000, defaulting to
   120. The limit applies independently to the raw repository candidates from
-  each query, before exclusions and TOML filtering.
+  each targeted or owner query, before exclusions and TOML filtering.
 - `repositorySearchRequestDelaySeconds`: a finite, non-negative number,
   defaulting to 2.1 seconds between repository-search requests, including
-  pagination and subsequent queries. This is separate from code-search pacing.
+  pagination and subsequent targeted or owner queries. This is separate from
+  code-search pacing.
+
+The packaged owner list was derived from `projectKind == plugin` records in the
+reviewed reference snapshot at `6158333`: 23 organizations and 46 personal
+accounts. The public `QEDeD` account is omitted because GitHub rejects its
+`user:` repository search; its plugin is still found by code search. The list
+is a discovery seed, not proof that every listed plugin is valid
+or that every producer has been found. When reviewing a new owner, verify its
+GitHub account type and update `ownerSearches` explicitly; do not automatically
+expand the list from unreviewed search results. Owner-scoped searches remain
+bounded and do not replace a future direct refresh of known repositories.
 
 A valid PEP 621 project qualifies when it contains a
 `[project.entry-points."nomad.plugin"]` table (including an empty table), or
@@ -51,7 +70,7 @@ do not qualify. No Poetry or YAML fallback is used.
 Root files and parsed metadata are reused across overlapping queries. A root
 already discovered by code search is processed through that existing path.
 Archived repositories and forks retain the existing classification and
-visibility policy.
+visibility policy. An owner match by itself never qualifies a repository.
 
 ## Interpret discovery diagnostics
 

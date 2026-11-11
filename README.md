@@ -17,6 +17,8 @@ Discovery combines GitHub code searches with supplementary repository searches.
 Repository results contribute only root `pyproject.toml` files with a NOMAD
 entry-point table or a `nomad-lab` dependency. Overlapping results are processed
 once; nested projects found by code search remain distinct catalogue entries.
+Reviewed plugin owners also receive separate organization- or user-scoped
+repository searches. Owner membership is a discovery hint, not an endorsement.
 
 ### Running the crawler
 

@@ -1,6 +1,8 @@
 import json
+import re
 from importlib.resources import files
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -9,6 +11,28 @@ DEFAULT_CONFIG_RESOURCE = 'plugin_catalogue_config.json'
 DEFAULT_CODE_SEARCH_REQUEST_DELAY_SECONDS = 6.5
 DEFAULT_REPOSITORY_SEARCH_REQUEST_DELAY_SECONDS = 2.1
 DEFAULT_REPOSITORY_SEARCH_CANDIDATE_LIMIT = 120
+OWNER_LOGIN_PATTERN = re.compile(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\Z')
+
+
+class GitHubOwnerSearch(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra='forbid')
+
+    login: str
+    owner_type: Literal['Organization', 'User'] = Field(alias='ownerType')
+
+    @field_validator('login', mode='before')
+    @classmethod
+    def validate_login(cls, value: object) -> str:
+        if not isinstance(value, str) or not OWNER_LOGIN_PATTERN.fullmatch(
+            value.strip()
+        ):
+            raise ValueError('github.ownerSearches contains an invalid GitHub login.')
+        return value.strip()
+
+    @property
+    def query(self) -> str:
+        qualifier = 'org' if self.owner_type == 'Organization' else 'user'
+        return f'{qualifier}:{self.login} nomad in:name,description'
 
 
 class GitHubDiscoveryConfig(BaseModel):
@@ -22,6 +46,9 @@ class GitHubDiscoveryConfig(BaseModel):
     )
     repository_search_queries: list[str] = Field(
         default_factory=list, alias='repositorySearchQueries'
+    )
+    owner_searches: list[GitHubOwnerSearch] = Field(
+        default_factory=list, alias='ownerSearches'
     )
     repository_search_candidate_limit: int = Field(
         default=DEFAULT_REPOSITORY_SEARCH_CANDIDATE_LIMIT,
@@ -95,6 +122,17 @@ class GitHubDiscoveryConfig(BaseModel):
             raise ValueError(
                 'github.codeSearchQueries must begin with the primary nomad.plugin '
                 'query.'
+            )
+        owner_logins = [owner.login.casefold() for owner in self.owner_searches]
+        if len(set(owner_logins)) != len(owner_logins):
+            raise ValueError('github.ownerSearches must not contain duplicate logins.')
+        all_queries = [
+            *self.repository_search_queries,
+            *(owner.query for owner in self.owner_searches),
+        ]
+        if len({query.casefold() for query in all_queries}) != len(all_queries):
+            raise ValueError(
+                'github.ownerSearches must not duplicate repositorySearchQueries.'
             )
         return self
 

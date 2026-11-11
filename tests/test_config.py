@@ -7,8 +7,13 @@ from nomad_plugins.config import (
     DEFAULT_CODE_SEARCH_REQUEST_DELAY_SECONDS,
     PRIMARY_CODE_SEARCH_QUERY,
     GitHubDiscoveryConfig,
+    GitHubOwnerSearch,
     load_catalogue_config,
 )
+
+EXPECTED_OWNER_COUNT = 69
+EXPECTED_ORGANIZATION_COUNT = 23
+EXPECTED_USER_COUNT = 46
 
 
 def test_packaged_default_config_loads_outside_repository(tmp_path, monkeypatch):
@@ -27,8 +32,6 @@ def test_packaged_default_config_loads_outside_repository(tmp_path, monkeypatch)
     assert {
         'topic:north-tool',
         'nomad-semantic in:name,description',
-        'org:FAIRmat-NFDI nomad in:name,description',
-        'org:nomad-coe nomad in:name,description',
     } <= set(config.github.repository_search_queries)
     assert (
         'nomad plugin in:name,description'
@@ -36,6 +39,33 @@ def test_packaged_default_config_loads_outside_repository(tmp_path, monkeypatch)
     )
     assert config.github.repository_search_candidate_limit == 120  # noqa: PLR2004
     assert config.github.repository_search_request_delay_seconds == 2.1  # noqa: PLR2004
+    assert len(config.github.owner_searches) == EXPECTED_OWNER_COUNT
+    assert (
+        sum(
+            owner.owner_type == 'Organization' for owner in config.github.owner_searches
+        )
+        == EXPECTED_ORGANIZATION_COUNT
+    )
+    assert (
+        sum(owner.owner_type == 'User' for owner in config.github.owner_searches)
+        == EXPECTED_USER_COUNT
+    )
+    owner_queries = {owner.query for owner in config.github.owner_searches}
+    assert {
+        'org:FAIRmat-NFDI nomad in:name,description',
+        'org:BAMresearch nomad in:name,description',
+        'org:IKZ-Berlin nomad in:name,description',
+        'org:ZBT-Tools nomad in:name,description',
+        'user:Bondoki nomad in:name,description',
+        'user:ladinesa nomad in:name,description',
+        'user:mado89 nomad in:name,description',
+        'user:PauloGitHB nomad in:name,description',
+    } <= owner_queries
+    assert all(
+        'org:' not in owner.query
+        for owner in config.github.owner_searches
+        if owner.owner_type == 'User'
+    )
 
 
 def test_custom_config_is_loaded_and_normalized(tmp_path):
@@ -60,6 +90,7 @@ def test_custom_config_is_loaded_and_normalized(tmp_path):
     assert config.github.code_search_queries[0] == PRIMARY_CODE_SEARCH_QUERY
     assert config.github.code_search_request_delay_seconds == 1
     assert config.github.repository_search_queries == []
+    assert config.github.owner_searches == []
 
 
 @pytest.mark.parametrize(
@@ -166,3 +197,57 @@ def test_repository_queries_can_be_normalized_or_disabled():
         ).repository_search_queries
         == []
     )
+
+
+def test_owner_searches_preserve_verified_account_type_and_normalize_login():
+    config = GitHubDiscoveryConfig.model_validate(
+        {
+            'codeSearchQueries': [PRIMARY_CODE_SEARCH_QUERY],
+            'ownerSearches': [
+                {'login': ' FAIRmat-NFDI ', 'ownerType': 'Organization'},
+                {'login': ' Bondoki ', 'ownerType': 'User'},
+            ],
+        }
+    )
+    assert config.owner_searches == [
+        GitHubOwnerSearch(login='FAIRmat-NFDI', owner_type='Organization'),
+        GitHubOwnerSearch(login='Bondoki', owner_type='User'),
+    ]
+    assert [owner.query for owner in config.owner_searches] == [
+        'org:FAIRmat-NFDI nomad in:name,description',
+        'user:Bondoki nomad in:name,description',
+    ]
+
+
+@pytest.mark.parametrize(
+    'owners',
+    [
+        [{'login': 'example', 'ownerType': 'Person'}],
+        [{'login': 'bad user', 'ownerType': 'User'}],
+        [{'login': 'example', 'ownerType': 'User', 'unknown': True}],
+        [
+            {'login': 'example', 'ownerType': 'User'},
+            {'login': 'EXAMPLE', 'ownerType': 'Organization'},
+        ],
+    ],
+)
+def test_invalid_owner_searches_are_rejected(owners):
+    with pytest.raises(ValidationError):
+        GitHubDiscoveryConfig.model_validate(
+            {'codeSearchQueries': [PRIMARY_CODE_SEARCH_QUERY], 'ownerSearches': owners}
+        )
+
+
+def test_owner_search_cannot_duplicate_explicit_repository_query():
+    with pytest.raises(ValidationError, match='duplicate repositorySearchQueries'):
+        GitHubDiscoveryConfig.model_validate(
+            {
+                'codeSearchQueries': [PRIMARY_CODE_SEARCH_QUERY],
+                'repositorySearchQueries': [
+                    'org:FAIRmat-NFDI nomad in:name,description'
+                ],
+                'ownerSearches': [
+                    {'login': 'fairmat-nfdi', 'ownerType': 'Organization'}
+                ],
+            }
+        )

@@ -451,7 +451,11 @@ async def discover_repository_search_candidates(
     probes: dict[str, tuple[PyProjectTOML | None, str]] = {}
     diagnostics: list[RepositoryQueryDiagnostics] = []
 
-    for query in config.github.repository_search_queries:
+    repository_queries = [
+        *config.github.repository_search_queries,
+        *(owner.query for owner in config.github.owner_searches),
+    ]
+    for query in repository_queries:
         try:
             result = await github_client.search_repositories(
                 query,

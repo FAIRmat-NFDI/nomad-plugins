@@ -1,10 +1,11 @@
 import asyncio
 from collections import Counter
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import quote
 
 import click
 import httpx
@@ -20,11 +21,18 @@ from pydantic import (
 )
 from pydantic.json_schema import SkipJsonSchema
 
-from nomad_plugins.config import CatalogueConfig, load_catalogue_config
+from nomad_plugins.config import (
+    CatalogueConfig,
+    CatalogueCurationConfig,
+    ConfiguredRepository,
+    load_catalogue_config,
+)
 from nomad_plugins.github import (
     GitHubClient,
     GitHubError,
+    GitHubNotFoundError,
     GitHubRepositoryDetails,
+    GitHubRepositorySummary,
     GitHubSearchDiagnostics,
     GitHubSearchIncompleteError,
     GitHubSearchResultItem,
@@ -36,7 +44,6 @@ from nomad_plugins.pyproject import (
     PyProjectTOML,
     has_nomad_ecosystem_signal,
     parse_pyproject,
-    parse_requirement_name,
     project_path_from_pyproject_path,
 )
 from nomad_plugins.transform import (
@@ -46,6 +53,7 @@ from nomad_plugins.transform import (
     derive_plugin_types,
     is_registry_visible,
     normalize_dependencies,
+    normalize_dependency_name,
     sorted_unique,
     stable_plugin_id,
 )
@@ -100,7 +108,9 @@ class Plugin(BaseModel):
     deployment: DeploymentInfo
     project_kind: ProjectKind = Field(alias='projectKind')
     registry_visible: bool = Field(alias='registryVisible')
-    metadata_source: Literal['pyproject.toml'] = Field(alias='metadataSource')
+    metadata_source: Literal['pyproject.toml', 'crawler-config'] = Field(
+        alias='metadataSource'
+    )
     discovery_warnings: list[str] = Field(
         default_factory=list,
         alias='discoveryWarnings',
@@ -182,37 +192,32 @@ class RepositoryDiscoveryResult:
     diagnostics: list[RepositoryQueryDiagnostics]
 
 
-class OasisURLs(Enum):
-    CENTRAL = (
-        'https://gitlab.mpcdf.mpg.de/nomad-lab/nomad-distro/-/raw/main/requirements.txt'
-    )
-    EXAMPLE = (
-        'https://gitlab.mpcdf.mpg.de/nomad-lab/nomad-distro/-/raw/'
-        'test-oasis/requirements.txt'
-    )
+class EnrichmentError(RuntimeError):
+    """Raised when external availability cannot be checked reliably."""
 
 
-# The following repositories are not actual plugins.
-EXCLUDED_REPOS = {
-    'nomad-coe/nomad',
-    'FAIRmat-NFDI/cookiecutter-nomad-plugin',
-    'FAIRmat-NFDI/pynxtools-plugin-template',
-}
-
-
-async def fetch_nomad_deployment_requirements(
-    requirements_url: str,
+async def fetch_nomad_deployment_packages(
+    info_url: str,
 ) -> set[str]:
-    """Fetch package names from a NOMAD deployment requirements file."""
-    response = await fetch_page_async(requirements_url)
-    if response:
-        return {
-            dependency_name
-            for line in response.text.splitlines()[2:]
-            if line.strip() and not line.lstrip().startswith('#')
-            if (dependency_name := parse_requirement_name(line)) is not None
-        }
-    return set()
+    """Fetch installed package names from a NOMAD deployment info endpoint."""
+    try:
+        response = await fetch_page_async(info_url)
+    except (httpx.HTTPStatusError, httpx.RequestError) as exc:
+        raise EnrichmentError(
+            f'Deployment packages could not be checked at {info_url}: {exc}'
+        ) from exc
+    try:
+        packages = response.json()['plugin_packages']
+        if not isinstance(packages, list) or not packages:
+            raise ValueError('plugin_packages must be a non-empty list')
+        names = [package['name'] for package in packages]
+        if any(not isinstance(name, str) or not name.strip() for name in names):
+            raise ValueError('plugin package names must be non-empty strings')
+    except (KeyError, TypeError, ValueError) as exc:
+        raise EnrichmentError(
+            f'Deployment info at {info_url} has invalid plugin_packages: {exc}'
+        ) from exc
+    return {normalize_dependency_name(name) for name in names}
 
 
 async def get_toml_project(
@@ -237,11 +242,16 @@ async def package_exists_on_pypi(package_name: str) -> bool:
     """Return whether PyPI currently has a project with this name."""
     async with httpx.AsyncClient() as client:
         try:
-            url = f'https://pypi.org/pypi/{package_name}/json'
-            response = await client.head(url)
-            return response.status_code == 200  # noqa: PLR2004
-        except httpx.RequestError:
-            return False
+            url = f'https://pypi.org/pypi/{quote(package_name, safe="")}/json'
+            response = await client.get(url)
+            if response.status_code == 404:  # noqa: PLR2004
+                return False
+            response.raise_for_status()
+            return True
+        except (httpx.RequestError, httpx.HTTPStatusError) as exc:
+            raise EnrichmentError(
+                f'PyPI availability could not be checked for {package_name!r}: {exc}'
+            ) from exc
 
 
 async def get_plugin(  # noqa: PLR0913
@@ -252,6 +262,7 @@ async def get_plugin(  # noqa: PLR0913
     central_plugins: set[str],
     example_oasis_plugins: set[str],
     project: PyProjectTOML | None = None,
+    pypi_lookup: Callable[[str], Awaitable[bool]] | None = None,
 ) -> Plugin | None:
     """Build one public plugin record from a discovered pyproject."""
     if project is None:
@@ -260,7 +271,7 @@ async def get_plugin(  # noqa: PLR0913
         return None
 
     name = project.name
-    on_pypi = await package_exists_on_pypi(name)
+    on_pypi = await (pypi_lookup or package_exists_on_pypi)(name)
     entrypoints = project.entry_points.nomad_plugin if project.entry_points else []
     dependencies = normalize_dependencies(project.all_dependencies or set())
     repository_url = str(item.repository.html_url)
@@ -300,8 +311,8 @@ async def get_plugin(  # noqa: PLR0913
             ),
         ),
         deployment=DeploymentInfo(
-            on_central=name in central_plugins,
-            on_example_oasis=name in example_oasis_plugins,
+            on_central=normalize_dependency_name(name) in central_plugins,
+            on_example_oasis=normalize_dependency_name(name) in example_oasis_plugins,
         ),
         project_kind=project_kind,
         registry_visible=is_registry_visible(
@@ -325,15 +336,12 @@ async def fetch_page_async(
     *,
     headers: dict | None = None,
     params: dict | None = None,
-) -> httpx.Response | None:
+) -> httpx.Response:
     """Fetch a non-GitHub page used by the current enrichment logic."""
     async with httpx.AsyncClient() as client:
-        try:
-            response = await client.get(url, headers=headers, params=params)
-            response.raise_for_status()
-            return response
-        except (httpx.HTTPStatusError, httpx.RequestError):
-            return None
+        response = await client.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        return response
 
 
 async def find_plugins(
@@ -357,7 +365,7 @@ async def discover_code_search_candidates(
 ) -> tuple[list[GitHubSearchResultItem], list[CodeQueryDiagnostics]]:
     candidates: dict[tuple[str, str], GitHubSearchResultItem] = {}
     diagnostics: list[CodeQueryDiagnostics] = []
-    excluded_repositories = {repository.casefold() for repository in EXCLUDED_REPOS}
+    excluded = set(config.curation.exclude_candidates)
 
     for query in config.github.code_search_queries:
         try:
@@ -373,14 +381,6 @@ async def discover_code_search_candidates(
             ) from exc
         candidate_audit: list[SearchCandidateAudit] = []
         for item in result.items:
-            if item.repository.full_name.casefold() in excluded_repositories:
-                candidate_audit.append(
-                    SearchCandidateAudit(
-                        candidate=stable_plugin_id(str(item.repository.html_url)),
-                        outcome='excluded',
-                    )
-                )
-                continue
             try:
                 key = code_search_candidate_key(item)
             except PyProjectError:
@@ -391,6 +391,11 @@ async def discover_code_search_candidates(
                 )
                 continue
             candidate_id = stable_plugin_id(str(item.repository.html_url), key[1])
+            if candidate_is_excluded(candidate_id, excluded):
+                candidate_audit.append(
+                    SearchCandidateAudit(candidate=candidate_id, outcome='excluded')
+                )
+                continue
             candidate_audit.append(
                 SearchCandidateAudit(
                     candidate=candidate_id,
@@ -445,7 +450,7 @@ async def discover_repository_search_candidates(
 ) -> RepositoryDiscoveryResult:
     """Probe new roots once and report outcomes for each overlapping query."""
     existing_keys = {code_search_candidate_key(item) for item in code_candidates}
-    excluded = {name.casefold() for name in EXCLUDED_REPOS}
+    excluded = set(config.curation.exclude_candidates)
     candidates: dict[tuple[str, str], GitHubSearchResultItem] = {}
     projects: dict[tuple[str, str], PyProjectTOML] = {}
     probes: dict[str, tuple[PyProjectTOML | None, str]] = {}
@@ -477,7 +482,7 @@ async def discover_repository_search_candidates(
             name = repository.full_name.casefold()
             key = (name, '')
             candidate_id = stable_plugin_id(str(repository.html_url))
-            if name in excluded:
+            if candidate_is_excluded(candidate_id, excluded):
                 outcomes['excluded'] += 1
                 candidate_audit.append(SearchCandidateAudit(candidate_id, 'excluded'))
                 continue
@@ -536,12 +541,141 @@ async def discover_repository_search_candidates(
     )
 
 
+def candidate_is_excluded(candidate_id: str, exclusions: set[str]) -> bool:
+    root_id = candidate_id.split('#', 1)[0]
+    return candidate_id.casefold() in exclusions or root_id.casefold() in exclusions
+
+
+async def load_manual_project_seeds(
+    github_client: GitHubClient,
+    config: CatalogueConfig,
+    existing_keys: set[tuple[str, str]],
+    known_projects: dict[tuple[str, str], PyProjectTOML] | None = None,
+) -> tuple[list[GitHubSearchResultItem], dict[tuple[str, str], PyProjectTOML]]:
+    """Fetch reviewed ordinary projects through the same PEP 621 gate."""
+    items: list[GitHubSearchResultItem] = []
+    projects: dict[tuple[str, str], PyProjectTOML] = {}
+    for seed in config.curation.manual_project_seeds:
+        key = (seed.repository.casefold(), seed.project_path or '')
+        if known_projects is not None and key in known_projects:
+            continue
+        path = '/'.join(part for part in (seed.project_path, 'pyproject.toml') if part)
+        url = (
+            f'{github_client.base_url}/repos/{seed.repository}/contents/'
+            f'{quote(path, safe="/")}'
+        )
+        try:
+            content = await github_client.fetch_text(url)
+        except GitHubNotFoundError as exc:
+            raise ValueError(
+                f'Manual project seed {seed.repository}:{path} has no pyproject.toml.'
+            ) from exc
+        except GitHubError as exc:
+            raise GitHubError(
+                f'Manual project seed {seed.repository}:{path} could not be fetched: '
+                f'{exc}'
+            ) from exc
+        try:
+            project = parse_pyproject(content, pyproject_path=path)
+        except PyProjectError as exc:
+            raise ValueError(
+                f'Manual project seed {seed.repository}:{path} is invalid: {exc}'
+            ) from exc
+        if not has_nomad_ecosystem_signal(project):
+            raise ValueError(
+                f'Manual project seed {seed.repository}:{path} has no NOMAD signal.'
+            )
+        if key not in existing_keys:
+            items.append(
+                GitHubSearchResultItem(
+                    path=path,
+                    url=url,
+                    repository=GitHubRepositorySummary(
+                        full_name=seed.repository,
+                        html_url=f'https://github.com/{seed.repository}',
+                    ),
+                )
+            )
+        projects[key] = project
+        existing_keys.add(key)
+    return items, projects
+
+
+def build_official_plugin(
+    row: ConfiguredRepository,
+    repository: GitHubRepositoryDetails,
+    *,
+    project_kind: Literal['official_template', 'official_software'],
+    central_plugins: set[str],
+    example_oasis_plugins: set[str],
+) -> Plugin:
+    repository_url = f'https://github.com/{row.repository}'
+    package_name = normalize_dependency_name(row.name)
+    return Plugin(
+        id=stable_plugin_id(repository_url),
+        name=row.name,
+        description=row.description,
+        repository_url=repository_url,
+        owner=repository.owner.login,
+        owner_type=repository.owner.type,
+        status=RepositoryStatus(
+            archived=repository.archived,
+            fork=repository.fork,
+            stars=repository.stargazers_count,
+            created_at=repository.created_at,
+            last_pushed_at=repository.pushed_at,
+            default_branch=repository.default_branch,
+            parent_repository_url=(
+                repository.parent.html_url if repository.parent else None
+            ),
+            source_repository_url=(
+                repository.source.html_url if repository.source else None
+            ),
+        ),
+        deployment=DeploymentInfo(
+            on_central=package_name in central_plugins,
+            on_example_oasis=package_name in example_oasis_plugins,
+        ),
+        project_kind=project_kind,
+        registry_visible=is_registry_visible(
+            project_kind, archived=repository.archived, fork=repository.fork
+        ),
+        metadata_source='crawler-config',
+    )
+
+
+def apply_url_suppressions(plugin: Plugin, curation: CatalogueCurationConfig) -> Plugin:
+    excluded_documentation = {
+        str(url).rstrip('/').casefold() for url in curation.exclude_documentation_urls
+    }
+    excluded_pypi = {
+        str(url).rstrip('/').casefold() for url in curation.exclude_pypi_urls
+    }
+    updates: dict[str, Any] = {}
+    if (
+        plugin.documentation_url is not None
+        and str(plugin.documentation_url).rstrip('/').casefold()
+        in excluded_documentation
+    ):
+        updates['documentation_url'] = None
+    if (
+        plugin.pypi_url is not None
+        and str(plugin.pypi_url).rstrip('/').casefold() in excluded_pypi
+    ):
+        updates['pypi_url'] = None
+    return plugin.model_copy(update=updates) if updates else plugin
+
+
 async def _find_plugins(
     github_client: GitHubClient,
     config: CatalogueConfig,
 ) -> CrawlResult:
-    example_task = fetch_nomad_deployment_requirements(OasisURLs.EXAMPLE.value)
-    central_task = fetch_nomad_deployment_requirements(OasisURLs.CENTRAL.value)
+    example_task = fetch_nomad_deployment_packages(
+        str(config.deployment_sources.example_oasis_info_url)
+    )
+    central_task = fetch_nomad_deployment_packages(
+        str(config.deployment_sources.central_info_url)
+    )
     search_task = discover_code_search_candidates(github_client, config)
     example_oasis_plugins, central_plugins, search_data = await asyncio.gather(
         example_task,
@@ -556,11 +690,25 @@ async def _find_plugins(
         code_search_candidate_key(item): item
         for item in [*search_items, *repository_discovery.candidates]
     }
+    manual_items, manual_projects = await load_manual_project_seeds(
+        github_client, config, set(candidates), repository_discovery.projects
+    )
+    candidates.update((code_search_candidate_key(item), item) for item in manual_items)
     search_items = [candidates[key] for key in sorted(candidates)]
     repository_names = {
         item.repository.full_name.casefold(): item.repository.full_name
         for item in search_items
     }
+    official_rows = [
+        (row, 'official_template')
+        for row in config.curation.official_template_repositories
+    ] + [
+        (row, 'official_software')
+        for row in config.curation.official_software_repositories
+    ]
+    repository_names.update(
+        (row.repository.casefold(), row.repository) for row, _ in official_rows
+    )
     repository_details = await asyncio.gather(
         *(
             github_client.fetch_repository(repository_names[key])
@@ -569,6 +717,21 @@ async def _find_plugins(
     )
     repositories = dict(zip(sorted(repository_names), repository_details, strict=True))
 
+    official_roots = {row.repository.casefold() for row, _ in official_rows}
+    pypi_tasks: dict[str, asyncio.Task[bool]] = {}
+    pypi_limit = asyncio.Semaphore(10)
+
+    async def cached_pypi_lookup(name: str) -> bool:
+        normalized_name = normalize_dependency_name(name)
+        if normalized_name not in pypi_tasks:
+
+            async def check() -> bool:
+                async with pypi_limit:
+                    return await package_exists_on_pypi(name)
+
+            pypi_tasks[normalized_name] = asyncio.create_task(check())
+        return await pypi_tasks[normalized_name]
+
     tasks = [
         get_plugin(
             item=item,
@@ -576,9 +739,17 @@ async def _find_plugins(
             repository=repositories[item.repository.full_name.casefold()],
             central_plugins=central_plugins,
             example_oasis_plugins=example_oasis_plugins,
-            project=repository_discovery.projects.get(code_search_candidate_key(item)),
+            project=(
+                repository_discovery.projects.get(code_search_candidate_key(item))
+                or manual_projects.get(code_search_candidate_key(item))
+            ),
+            pypi_lookup=cached_pypi_lookup,
         )
         for item in search_items
+        if not (
+            item.repository.full_name.casefold() in official_roots
+            and code_search_candidate_key(item)[1] == ''
+        )
     ]
 
     plugins: dict[str, Plugin] = {}
@@ -589,8 +760,18 @@ async def _find_plugins(
         for future in asyncio.as_completed(tasks):
             plugin = await future
             if plugin:
-                plugins[plugin.id] = plugin
+                plugins[plugin.id] = apply_url_suppressions(plugin, config.curation)
             bar.update(1)
+
+    for row, project_kind in official_rows:
+        plugin = build_official_plugin(
+            row,
+            repositories[row.repository.casefold()],
+            project_kind=project_kind,
+            central_plugins=central_plugins,
+            example_oasis_plugins=example_oasis_plugins,
+        )
+        plugins[plugin.id] = plugin
 
     return CrawlResult(
         plugins=[plugins[plugin_id] for plugin_id in sorted(plugins)],

@@ -87,5 +87,40 @@
     ],
     "repositorySearchCandidateLimit": 120,
     "repositorySearchRequestDelaySeconds": 2.1
+  },
+  "curation": {
+    "officialTemplateRepositories": [
+      {"repository":"FAIRmat-NFDI/cookiecutter-nomad-plugin","name":"cookiecutter-nomad-plugin","description":"A cookiecutter template for creating NOMAD plugin repositories."},
+      {"repository":"FAIRmat-NFDI/nomad-plugin-template","name":"nomad-plugin-template","description":"A template repository for creating a repository with a NOMAD plugin package."},
+      {"repository":"FAIRmat-NFDI/nomad-distro-dev","name":"nomad-distro-dev","description":"A development template repository for creating NOMAD distributions with custom plugins."},
+      {"repository":"FAIRmat-NFDI/nomad-distro-template","name":"nomad-distro-template","description":"A template repository for creating NOMAD distributions with custom plugins."},
+      {"repository":"FAIRmat-NFDI/pynxtools-plugin-template","name":"pynxtools-plugin-template","description":"A cookiecutter template for creating pynxtools-based NOMAD plugins."}
+    ],
+    "officialSoftwareRepositories": [
+      {"repository":"FAIRmat-NFDI/nomad","name":"nomad-lab","description":"The core NOMAD research data management platform."},
+      {"repository":"FAIRmat-NFDI/nomad-docs","name":"nomad-docs","description":"The official NOMAD documentation."},
+      {"repository":"FAU-LAP/NOMAD-CAMELS","name":"NOMAD-CAMELS","description":"Configurable Application for Measurements, Experiments and Laboratory-Systems."}
+    ],
+    "manualProjectSeeds": [],
+    "excludeCandidates": [
+      "github.com/nomad-coe/nomad",
+      "github.com/fairmat-nfdi/cookiecutter-nomad-plugin",
+      "github.com/fairmat-nfdi/pynxtools-plugin-template",
+      "github.com/bondoki/nomad-app-test",
+      "github.com/bondoki/tmp-nomad-plugin-v1.4.2"
+    ],
+    "excludeDocumentationUrls": [
+      "https://fairmat-nfdi.github.io/nomad-parser-w2dynamics/",
+      "https://github.com/FAIRmat-NFDI/AreaA-data_modeling_and_schemas/tree/main/RTG_SIMS",
+      "https://github.com/nomad-coe/nomad-parser-example-plugin",
+      "https://josepizarro3.github.io/nomad-networkx/",
+      "https://marzieh-saeedimasine.github.io/nomad-plugin-spectroscopy",
+      "https://oscarpes.readthedocs.io/"
+    ],
+    "excludePypiUrls": []
+  },
+  "deploymentSources": {
+    "centralInfoUrl": "https://nomad-lab.eu/backend/api/v1/info",
+    "exampleOasisInfoUrl": "https://nomad-lab.eu/prod/v1/oasis/api/v1/info"
   }
 }

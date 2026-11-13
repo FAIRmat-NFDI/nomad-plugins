@@ -97,7 +97,7 @@ def test_build_catalogue_snapshot_normalizes_public_output():
 
     data = snapshot.model_dump(mode='json', by_alias=True, exclude_none=True)
 
-    assert data['schemaVersion'] == '2.1.0'
+    assert data['schemaVersion'] == '2.2.0'
     assert data['dataUpdatedAt'] == '2024-01-03T00:00:00Z'
     assert data['sourceSummary'] == {
         'pluginCount': 2,
@@ -179,7 +179,7 @@ def test_catalogue_snapshot_rejects_invalid_timestamp():
     with pytest.raises(ValidationError, match='dataUpdatedAt'):
         CatalogueSnapshot.model_validate(
             {
-                'schemaVersion': '2.1.0',
+                'schemaVersion': '2.2.0',
                 'dataUpdatedAt': 'not-a-timestamp',
                 'sourceSummary': {
                     'pluginCount': 0,

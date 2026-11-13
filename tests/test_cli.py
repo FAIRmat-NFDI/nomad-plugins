@@ -123,7 +123,7 @@ def test_crawl_writes_deterministic_catalogue_snapshot_json(tmp_path):
         'latest reported total: 2.'
     ) in result.output
     assert 'Unique pyproject.toml candidates: 2.' in result.output
-    assert data['schemaVersion'] == '2.1.0'
+    assert data['schemaVersion'] == '2.2.0'
     assert data['sourceSummary'] == {
         'pluginCount': 2,
         'projectKindCounts': {'plugin': 2},
@@ -233,7 +233,7 @@ def test_queries_prints_packaged_configuration_without_credentials():
 
     assert result.exit_code == 0, result.output
     assert json.loads(result.output) == load_catalogue_config().model_dump(
-        by_alias=True
+        mode='json', by_alias=True
     )
     assert 'repositorySearchQueries' in result.output
 

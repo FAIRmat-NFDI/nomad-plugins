@@ -66,6 +66,27 @@ def test_packaged_default_config_loads_outside_repository(tmp_path, monkeypatch)
         for owner in config.github.owner_searches
         if owner.owner_type == 'User'
     )
+    assert config.curation.exclude_pypi_urls == []
+    assert {
+        'github.com/bondoki/nomad-app-test',
+        'github.com/bondoki/tmp-nomad-plugin-v1.4.2',
+    } <= set(config.curation.exclude_candidates)
+    assert {row.name for row in config.curation.official_template_repositories} == {
+        'cookiecutter-nomad-plugin',
+        'nomad-plugin-template',
+        'nomad-distro-dev',
+        'nomad-distro-template',
+        'pynxtools-plugin-template',
+    }
+    assert {row.name for row in config.curation.official_software_repositories} == {
+        'nomad-lab',
+        'nomad-docs',
+        'NOMAD-CAMELS',
+    }
+    assert str(config.deployment_sources.central_info_url).endswith('/api/v1/info')
+    assert str(config.deployment_sources.example_oasis_info_url).endswith(
+        '/api/v1/info'
+    )
 
 
 def test_custom_config_is_loaded_and_normalized(tmp_path):

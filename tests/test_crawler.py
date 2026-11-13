@@ -7,6 +7,7 @@ import pytest
 from nomad_plugins.config import (
     PRIMARY_CODE_SEARCH_QUERY,
     CatalogueConfig,
+    CatalogueCurationConfig,
     GitHubDiscoveryConfig,
 )
 from nomad_plugins.crawler import (
@@ -89,7 +90,7 @@ def test_find_plugins_deduplicates_queries_and_keeps_nested_projects():
 
     with (
         patch(
-            'nomad_plugins.crawler.fetch_nomad_deployment_requirements',
+            'nomad_plugins.crawler.fetch_nomad_deployment_packages',
             new=AsyncMock(return_value=set()),
         ),
         patch(
@@ -211,7 +212,10 @@ def test_code_search_audit_records_exclusions_and_invalid_paths():
         )
     )
     config = CatalogueConfig(
-        github=GitHubDiscoveryConfig(code_search_queries=[PRIMARY_CODE_SEARCH_QUERY])
+        github=GitHubDiscoveryConfig(code_search_queries=[PRIMARY_CODE_SEARCH_QUERY]),
+        curation=CatalogueCurationConfig(
+            exclude_candidates=['github.com/fairmat-nfdi/cookiecutter-nomad-plugin']
+        ),
     )
 
     candidates, diagnostics = asyncio.run(

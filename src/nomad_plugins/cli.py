@@ -4,7 +4,12 @@ from pathlib import Path
 
 import click
 
-from nomad_plugins.catalogue import build_catalogue_snapshot, write_catalogue_snapshot
+from nomad_plugins.catalogue import (
+    DEFAULT_SCHEMA_PATH,
+    build_catalogue_snapshot,
+    validate_catalogue_file,
+    write_catalogue_snapshot,
+)
 from nomad_plugins.config import load_catalogue_config
 from nomad_plugins.crawler import Plugin, SearchCandidateAudit, find_plugins
 
@@ -132,6 +137,34 @@ def queries(config_path: Path | None) -> None:
             indent=2,
             sort_keys=True,
         )
+    )
+
+
+@main.command()
+@click.option(
+    '--input',
+    'input_path',
+    required=True,
+    type=click.Path(path_type=Path, dir_okay=False, exists=True),
+    help='Catalogue snapshot JSON to validate.',
+)
+@click.option(
+    '--schema',
+    'schema_path',
+    default=DEFAULT_SCHEMA_PATH,
+    show_default=True,
+    type=click.Path(path_type=Path, dir_okay=False, exists=True),
+    help='Committed catalogue JSON Schema to validate against.',
+)
+def validate(input_path: Path, schema_path: Path) -> None:
+    """Validate a catalogue snapshot against the current model and JSON Schema."""
+    try:
+        snapshot = validate_catalogue_file(input_path, schema_path)
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(
+        f'Validated catalogue snapshot with {len(snapshot.plugins)} record(s) '
+        f'in {input_path}.'
     )
 
 

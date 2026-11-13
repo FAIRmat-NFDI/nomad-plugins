@@ -27,6 +27,7 @@ license = { file = "LICENSE" }
 dependencies = [
     "click",
     "httpx>=0.27.2",
+    "jsonschema>=4.23",
     "packaging",
     "pydantic>=2",
     "python-dotenv",

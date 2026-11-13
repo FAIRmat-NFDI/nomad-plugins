@@ -42,8 +42,15 @@ Run the crawler export:
 plugin-catalogue crawl --github-token <token> --output plugins.json
 ```
 
-Both commands accept `--config <path>` to override the packaged
-`plugin_catalogue_config.json`.
+Validate a generated snapshot against the current model and committed JSON
+Schema from the repository root:
+
+```
+plugin-catalogue validate --input plugins.json
+```
+
+The `crawl` and `queries` commands accept `--config <path>` to override the
+packaged `plugin_catalogue_config.json`.
 Use `--audit-searches` with `crawl` to list each query's candidates, exclusions,
 overlaps, and final exported project kinds without changing the JSON output.
 

@@ -1,9 +1,14 @@
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from click.testing import CliRunner
 
-from nomad_plugins.catalogue import CatalogueSnapshot
+from nomad_plugins.catalogue import (
+    CatalogueSnapshot,
+    build_catalogue_snapshot,
+    write_catalogue_snapshot,
+)
 from nomad_plugins.cli import main
 from nomad_plugins.config import PRIMARY_CODE_SEARCH_QUERY, load_catalogue_config
 from nomad_plugins.crawler import (
@@ -17,6 +22,8 @@ from nomad_plugins.crawler import (
 )
 from nomad_plugins.github import GitHubSearchDiagnostics, GitHubSearchIncompleteError
 from nomad_plugins.pyproject import PluginEntryPoint
+
+SCHEMA_PATH = Path(__file__).resolve().parents[1] / 'plugin-catalogue.schema.json'
 
 
 def _plugin(
@@ -236,6 +243,83 @@ def test_queries_prints_packaged_configuration_without_credentials():
         mode='json', by_alias=True
     )
     assert 'repositorySearchQueries' in result.output
+
+
+def test_validate_accepts_generated_snapshot_without_credentials(tmp_path):
+    output = tmp_path / 'plugins.json'
+    write_catalogue_snapshot(build_catalogue_snapshot([_plugin('alpha')]), output)
+
+    result = CliRunner().invoke(
+        main,
+        ['validate', '--input', str(output), '--schema', str(SCHEMA_PATH)],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (
+        f'Validated catalogue snapshot with 1 record(s) in {output}.' in result.output
+    )
+
+
+def test_validate_rejects_snapshot_model_error(tmp_path):
+    output = tmp_path / 'plugins.json'
+    data = build_catalogue_snapshot([_plugin('alpha')]).model_dump(
+        mode='json', by_alias=True, exclude_none=True
+    )
+    data['sourceSummary']['pluginCount'] = 2
+    output.write_text(json.dumps(data), encoding='utf-8')
+
+    result = CliRunner().invoke(
+        main,
+        ['validate', '--input', str(output), '--schema', str(SCHEMA_PATH)],
+    )
+
+    assert result.exit_code != 0
+    assert 'sourceSummary.pluginCount' in result.output
+
+
+def test_validate_rejects_malformed_json(tmp_path):
+    output = tmp_path / 'plugins.json'
+    output.write_text('{', encoding='utf-8')
+
+    result = CliRunner().invoke(
+        main,
+        ['validate', '--input', str(output), '--schema', str(SCHEMA_PATH)],
+    )
+
+    assert result.exit_code != 0
+    assert 'Expecting property name' in result.output
+
+
+def test_validate_rejects_json_schema_error_after_model_coercion(tmp_path):
+    output = tmp_path / 'plugins.json'
+    data = build_catalogue_snapshot([_plugin('alpha')]).model_dump(
+        mode='json', by_alias=True, exclude_none=True
+    )
+    data['sourceSummary']['pluginCount'] = '1'
+    output.write_text(json.dumps(data), encoding='utf-8')
+
+    result = CliRunner().invoke(
+        main,
+        ['validate', '--input', str(output), '--schema', str(SCHEMA_PATH)],
+    )
+
+    assert result.exit_code != 0
+    assert 'JSON Schema validation failed at sourceSummary/pluginCount' in result.output
+
+
+def test_validate_rejects_outdated_schema(tmp_path):
+    output = tmp_path / 'plugins.json'
+    schema = tmp_path / 'schema.json'
+    write_catalogue_snapshot(build_catalogue_snapshot([]), output)
+    schema.write_text('{}', encoding='utf-8')
+
+    result = CliRunner().invoke(
+        main,
+        ['validate', '--input', str(output), '--schema', str(schema)],
+    )
+
+    assert result.exit_code != 0
+    assert 'out of date with the model' in result.output
 
 
 def test_crawl_accepts_custom_configuration(tmp_path):

@@ -72,6 +72,37 @@ already discovered by code search is processed through that existing path.
 Archived repositories and forks retain the existing classification and
 visibility policy. An owner match by itself never qualifies a repository.
 
+## Curate entries and check availability
+
+The packaged `curation` section contains reviewed `officialTemplateRepositories`
+and `officialSoftwareRepositories` rows. Each row has a GitHub `repository` in
+`owner/name` form, a public `name`, and a `description`. These rows use live
+GitHub repository status but intentionally do not require a `pyproject.toml`;
+their `metadataSource` is `crawler-config`. They replace a discovered
+root record with the same stable ID, while nested projects remain distinct.
+
+`manualProjectSeeds` accepts `{ "repository": "owner/name", "projectPath":
+"optional/nested/path" }`. Unlike official rows, seeds must have a valid PEP
+621 `pyproject.toml` and the same NOMAD signal required of discovered projects.
+An invalid or missing seed fails the crawl. Seeds already found by search
+deduplicate by stable ID and project path; parsed repository-search metadata is
+reused, while code-search overlaps are verified from the default-branch file.
+
+`excludeCandidates` lists exact catalogue IDs; excluding a repository root
+also excludes its nested candidates from discovery, but does not prevent an
+explicit official row. `excludeDocumentationUrls` and `excludePypiUrls`
+suppress known incorrect links without removing otherwise valid records. These
+lists are small, reviewed exceptions, not alternate discovery rules.
+The packaged candidate exclusions include two temporary test repositories
+surfaced by owner search; their metadata describes them as tests/removable.
+
+`deploymentSources` names the central and example Oasis `/info` endpoints.
+The crawler reads their installed `plugin_packages` and checks PyPI's project
+JSON API before emitting a PyPI link. A failed or malformed deployment response,
+or an indeterminate PyPI response, aborts the crawl without replacing an
+existing output file; only a confirmed PyPI 404 means the package is absent.
+This prevents source outages from being recorded as confirmed `false` values.
+
 ## Interpret discovery diagnostics
 
 Each repository query reports its latest GitHub total, raw fetched count,
@@ -107,5 +138,5 @@ identifies the query or repository; the existing output is preserved. Only
 HTTP 404 on a supplementary root probe is treated as a normally missing file.
 Malformed TOML or invalid PEP 621 metadata is reported and excluded.
 
-Discovery changes do not alter the public catalogue contract; snapshots remain
-on schema version `2.1.0`.
+Configured official rows extend the public `metadataSource` values, so this
+snapshot contract uses schema version `2.2.0`.

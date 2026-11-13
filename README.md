@@ -19,6 +19,8 @@ entry-point table or a `nomad-lab` dependency. Overlapping results are processed
 once; nested projects found by code search remain distinct catalogue entries.
 Reviewed plugin owners also receive separate organization- or user-scoped
 repository searches. Owner membership is a discovery hint, not an endorsement.
+Reviewed curation adds official software/templates and optional manual project
+seeds; live NOMAD deployment and PyPI checks enrich the exported records.
 
 ### Running the crawler
 

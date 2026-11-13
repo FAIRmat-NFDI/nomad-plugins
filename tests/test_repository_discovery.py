@@ -11,6 +11,7 @@ from nomad_plugins.cli import main
 from nomad_plugins.config import (
     PRIMARY_CODE_SEARCH_QUERY,
     CatalogueConfig,
+    CatalogueCurationConfig,
     GitHubDiscoveryConfig,
 )
 from nomad_plugins.crawler import (
@@ -50,7 +51,10 @@ def _config():
             code_search_request_delay_seconds=0,
             repository_search_queries=REPOSITORY_QUERIES,
             repository_search_request_delay_seconds=0,
-        )
+        ),
+        curation=CatalogueCurationConfig(
+            exclude_candidates=['github.com/fairmat-nfdi/cookiecutter-nomad-plugin']
+        ),
     )
 
 
@@ -88,7 +92,7 @@ def _run_crawl(handler, config=None):
 
     with (
         patch(
-            'nomad_plugins.crawler.fetch_nomad_deployment_requirements',
+            'nomad_plugins.crawler.fetch_nomad_deployment_packages',
             new=AsyncMock(return_value=set()),
         ),
         patch(
@@ -482,7 +486,7 @@ def test_repository_failures_preserve_existing_cli_output(tmp_path, failure):
             patch('nomad_plugins.crawler.GitHubClient', return_value=client),
             patch('nomad_plugins.github.asyncio.sleep', new=AsyncMock()),
             patch(
-                'nomad_plugins.crawler.fetch_nomad_deployment_requirements',
+                'nomad_plugins.crawler.fetch_nomad_deployment_packages',
                 new=AsyncMock(return_value=set()),
             ),
         ):

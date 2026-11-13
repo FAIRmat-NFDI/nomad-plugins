@@ -10,11 +10,13 @@ from nomad_plugins.catalogue import (
     CatalogueSnapshot,
     CatalogueSourceSummary,
     build_catalogue_snapshot,
+    serialize_catalogue_snapshot,
 )
 from nomad_plugins.crawler import DeploymentInfo, Plugin, RepositoryStatus
 from nomad_plugins.pyproject import PluginEntryPoint
 
 SCHEMA_PATH = Path(__file__).resolve().parents[1] / 'plugin-catalogue.schema.json'
+SNAPSHOT_PATH = Path(__file__).resolve().parents[1] / 'plugin-catalogue.json'
 
 
 def _plugin(  # noqa: PLR0913
@@ -235,3 +237,12 @@ def test_catalogue_schema_file_is_current():
     )
 
     assert SCHEMA_PATH.read_text(encoding='utf-8') == current_schema
+
+
+def test_committed_catalogue_baseline_matches_model_and_serializer():
+    content = SNAPSHOT_PATH.read_text(encoding='utf-8')
+
+    snapshot = CatalogueSnapshot.model_validate_json(content)
+
+    assert content == serialize_catalogue_snapshot(snapshot)
+    assert snapshot == build_catalogue_snapshot(snapshot.plugins)

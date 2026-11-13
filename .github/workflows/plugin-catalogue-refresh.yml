@@ -1,0 +1,73 @@
+name: Refresh plugin catalogue
+
+on:
+  schedule:
+    # First day of each month at 00:00 UTC.
+    - cron: '0 0 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: plugin-catalogue-refresh
+  cancel-in-progress: false
+
+jobs:
+  crawl-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.12'
+      - name: Install catalogue generator
+        run: uv sync
+      - name: Crawl once
+        env:
+          GITHUB_TOKEN: ${{ secrets.PLUGIN_CATALOGUE_GITHUB_TOKEN }}
+        run: |
+          if [ -z "$GITHUB_TOKEN" ]; then
+            echo '::error::Set the PLUGIN_CATALOGUE_GITHUB_TOKEN repository secret.'
+            exit 1
+          fi
+          uv run plugin-catalogue crawl --output plugin-catalogue.json
+      - name: Validate the generated snapshot
+        run: uv run plugin-catalogue validate --input plugin-catalogue.json
+      - name: Upload validated catalogue artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-catalogue
+          path: plugin-catalogue.json
+          if-no-files-found: error
+
+  update-catalogue-pr:
+    needs: crawl-and-validate
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # Repository Actions settings must allow the workflow token to create PRs.
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Download validated catalogue artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: plugin-catalogue
+          path: .
+      - name: Open or update catalogue-only pull request
+        uses: peter-evans/create-pull-request@v8
+        with:
+          branch: automated/plugin-catalogue
+          base: main
+          add-paths: plugin-catalogue.json
+          commit-message: Update plugin catalogue snapshot
+          title: Update plugin catalogue snapshot
+          body: |
+            Updates `plugin-catalogue.json` from the monthly or manually triggered
+            catalogue crawl. The snapshot was validated against the current
+            Pydantic model and committed JSON Schema before this PR was opened.

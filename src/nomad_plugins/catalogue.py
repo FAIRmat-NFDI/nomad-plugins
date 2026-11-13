@@ -5,6 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Final, Literal
 
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from nomad_plugins.crawler import Plugin
@@ -114,6 +116,32 @@ def build_catalogue_snapshot(
 def serialize_catalogue_snapshot(snapshot: CatalogueSnapshot) -> str:
     data = snapshot.model_dump(mode='json', by_alias=True, exclude_none=True)
     return json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + '\n'
+
+
+def validate_catalogue_file(
+    input_path: Path,
+    schema_path: Path = DEFAULT_SCHEMA_PATH,
+) -> CatalogueSnapshot:
+    """Validate one snapshot against its Pydantic and JSON Schema contracts."""
+    data = json.loads(input_path.read_text(encoding='utf-8'))
+    snapshot = CatalogueSnapshot.model_validate(data)
+    schema = json.loads(schema_path.read_text(encoding='utf-8'))
+    if schema != CatalogueSnapshot.model_json_schema():
+        raise ValueError(
+            f'Catalogue JSON Schema at {schema_path} is out of date with the model.'
+        )
+    Draft202012Validator.check_schema(schema)
+    try:
+        Draft202012Validator(
+            schema,
+            format_checker=Draft202012Validator.FORMAT_CHECKER,
+        ).validate(data)
+    except JsonSchemaValidationError as exc:
+        location = '/'.join(str(part) for part in exc.absolute_path) or '$'
+        raise ValueError(
+            f'JSON Schema validation failed at {location}: {exc.message}'
+        ) from exc
+    return snapshot
 
 
 def write_catalogue_snapshot(snapshot: CatalogueSnapshot, output: Path) -> None:

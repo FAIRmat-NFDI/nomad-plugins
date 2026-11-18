@@ -1,0 +1,29 @@
+{
+  "auditDate": "2026-11-18",
+  "cases": [
+    {
+      "caseId": "archived-nested-econversion",
+      "status": "Needs direct-path verification",
+      "affectedStableIds": [
+        "github.com/harrytyp/econversion-nomad#plugins/instrument_data",
+        "github.com/harrytyp/econversion-nomad#plugins/instrument_data_old",
+        "github.com/harrytyp/econversion-nomad#plugins/instrument_data_old/instrument_data",
+        "github.com/harrytyp/econversion-nomad#bridge",
+        "github.com/harrytyp/econversion-nomad#plugins/three_way_sync"
+      ],
+      "finding": "The current snapshot retains the repository root as archived and hidden, but these five nested plugin IDs from the original reference were not rediscovered.",
+      "mechanism": "The current crawler discovers nested pyprojects through GitHub's legacy code search, which excludes archived repositories. Repository and owner searches probe only the root pyproject.",
+      "unverified": "Whether each nested pyproject.toml still exists and validates at its previous path on the current default branch.",
+      "proposedHandling": "Fetch each known nested path directly. Retain valid projects as archived and hidden; treat a missing path as removed only after checking it.",
+      "evidenceUrls": [
+        "https://docs.github.com/en/search-github/searching-on-github/searching-code",
+        "https://github.com/harrytyp/econversion-nomad"
+      ],
+      "localEvidence": [
+        "plugin-catalogue.json",
+        "src/nomad_plugins/crawler.py",
+        "src/nomad_plugins/plugin_catalogue_config.json"
+      ]
+    }
+  ]
+}

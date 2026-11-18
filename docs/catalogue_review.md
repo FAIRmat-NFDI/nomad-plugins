@@ -73,3 +73,9 @@ or explicit reviewed curation, followed by a new crawl and comparison.
 For a moved ID, a comment on either the original or current ID is carried into
 the single row. Conflicting comments on both IDs make regeneration fail rather
 than silently discarding either one.
+
+Preliminary agent findings from this baseline review are recorded separately in
+`docs/catalogue_review_findings.json`. The prepared workbook shows them on an
+`Agent audit` tab and marks affected rows in `Audit flags`, leaving the editable
+reviewer fields untouched. These findings are audit notes, not approved curation
+or changes to the generated catalogue.

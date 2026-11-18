@@ -7,13 +7,17 @@ group, visibility reason, repository and `pyproject.toml` links, and four
 editable reviewer fields. `Hidden plugin` is a separate group on every export;
 other hidden project kinds remain in `Hidden non-plugin`.
 
+Keep annotated files in `outputs/catalogue-review-<date>/` within the
+repository. That folder is ignored by Git, so comments stay local until you
+choose to share them; back it up if needed.
+
 From the repository root, generate the first table:
 
 ```bash
 uv run plugin-catalogue review \
   --input plugin-catalogue.json \
   --reference /path/to/original/plugin-registry.json \
-  --output /path/to/catalogue-review.csv
+  --output outputs/catalogue-review-local/catalogue-review.csv
 ```
 
 The original `plugin-registry.json` from `plugin-registry/collapsed` commit
@@ -45,8 +49,8 @@ and validates it before replacing it atomically:
 uv run plugin-catalogue review \
   --input plugin-catalogue.json \
   --reference /path/to/original/plugin-registry.json \
-  --previous /path/to/catalogue-review.csv \
-  --output /path/to/catalogue-review.csv
+  --previous outputs/catalogue-review-local/catalogue-review.csv \
+  --output outputs/catalogue-review-local/catalogue-review.csv
 ```
 
 Reviewer fields are matched by stable ID, not row position. A previously

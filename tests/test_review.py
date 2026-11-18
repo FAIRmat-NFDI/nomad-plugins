@@ -8,9 +8,11 @@ from nomad_plugins.catalogue import build_catalogue_snapshot, write_catalogue_sn
 from nomad_plugins.cli import main
 from nomad_plugins.crawler import DeploymentInfo, Plugin, RepositoryStatus
 from nomad_plugins.review import (
+    ReviewMove,
     build_review_rows,
     load_previous_review,
     load_reference,
+    load_review_moves,
     write_review_csv,
 )
 
@@ -178,3 +180,133 @@ def test_reference_loader_rejects_duplicate_ids(tmp_path):
     )
     with pytest.raises(ValueError, match='Duplicate stable ID'):
         load_reference(reference)
+
+
+def test_review_collapses_verified_move_and_carries_original_comment():
+    snapshot = build_catalogue_snapshot([_plugin('new')])
+    original_id = 'github.com/example/old'
+    current_id = 'github.com/example/new'
+    reference = {
+        original_id: {
+            'id': original_id,
+            'name': 'old',
+            'repositoryUrl': 'https://github.com/example/old',
+            'projectKind': 'plugin',
+            'registryVisible': True,
+            'status': {'defaultBranch': 'main'},
+        }
+    }
+    previous = {
+        original_id: {
+            'Stable ID': original_id,
+            'Reviewer comment': 'Already checked this package',
+        }
+    }
+    move = ReviewMove(original_id, current_id, 'Repository renamed')
+
+    rows = build_review_rows(
+        snapshot, reference=reference, previous=previous, moves={original_id: move}
+    )
+
+    assert len(rows) == 1
+    assert rows[0]['Review group'] == 'Moved'
+    assert rows[0]['Stable ID'] == current_id
+    assert rows[0]['Original stable ID'] == original_id
+    assert rows[0]['Presence'] == 'Moved ID'
+    assert rows[0]['Move basis'] == 'Repository renamed'
+    assert rows[0]['Repository URL'] == 'https://github.com/example/new'
+    assert rows[0]['Original repository URL'] == 'https://github.com/example/old'
+    assert rows[0]['Reviewer comment'] == 'Already checked this package'
+
+
+def test_review_rejects_unmatched_move_and_conflicting_comments():
+    snapshot = build_catalogue_snapshot([_plugin('new')])
+    original_id = 'github.com/example/old'
+    current_id = 'github.com/example/new'
+    reference = {
+        original_id: {
+            'id': original_id,
+            'name': 'old',
+            'repositoryUrl': 'https://github.com/example/old',
+            'projectKind': 'plugin',
+            'registryVisible': True,
+        }
+    }
+    move = ReviewMove(original_id, current_id, 'Repository renamed')
+
+    with pytest.raises(ValueError, match='source is not original-only'):
+        build_review_rows(snapshot, moves={original_id: move})
+    with pytest.raises(ValueError, match='Conflicting reviewer values'):
+        build_review_rows(
+            snapshot,
+            reference=reference,
+            previous={
+                original_id: {'Reviewer comment': 'Old comment'},
+                current_id: {'Reviewer comment': 'Different comment'},
+            },
+            moves={original_id: move},
+        )
+
+
+def test_review_command_applies_explicit_move_file(tmp_path):
+    snapshot_path = tmp_path / 'catalogue.json'
+    reference_path = tmp_path / 'reference.json'
+    moves_path = tmp_path / 'moves.json'
+    output_path = tmp_path / 'review.csv'
+    write_catalogue_snapshot(build_catalogue_snapshot([_plugin('new')]), snapshot_path)
+    reference_path.write_text(
+        json.dumps(
+            {
+                'plugins': [
+                    {
+                        'id': 'github.com/example/old',
+                        'name': 'old',
+                        'repositoryUrl': 'https://github.com/example/old',
+                        'projectKind': 'plugin',
+                        'registryVisible': True,
+                    }
+                ]
+            }
+        ),
+        encoding='utf-8',
+    )
+    moves_path.write_text(
+        json.dumps(
+            {
+                'moves': [
+                    {
+                        'originalId': 'github.com/example/old',
+                        'currentId': 'github.com/example/new',
+                        'basis': 'Repository renamed',
+                    }
+                ]
+            }
+        ),
+        encoding='utf-8',
+    )
+
+    result = CliRunner().invoke(
+        main,
+        [
+            'review',
+            '--input',
+            str(snapshot_path),
+            '--reference',
+            str(reference_path),
+            '--moves',
+            str(moves_path),
+            '--output',
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert 'Moved: 1' in result.output
+    with output_path.open(encoding='utf-8-sig', newline='') as stream:
+        rows = list(csv.DictReader(stream))
+    assert len(rows) == 1
+    assert rows[0]['Review group'] == 'Moved'
+    assert (
+        load_review_moves(moves_path)['github.com/example/old'].basis
+        == 'Repository renamed'
+    )

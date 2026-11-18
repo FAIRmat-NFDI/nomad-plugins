@@ -7,6 +7,13 @@ group, visibility reason, repository and `pyproject.toml` links, and four
 editable reviewer fields. `Hidden plugin` is a separate group on every export;
 other hidden project kinds remain in `Hidden non-plugin`.
 
+For the initial comparison with the old homepage catalogue, use the verified
+one-to-one mappings in `docs/catalogue_review_moves.json`. These collapse an
+original-only and current-only ID into a single `Moved` row, showing both IDs,
+both repository URLs, and the evidence basis. The mapping affects only the
+review table; it does not rewrite catalogue IDs or assume that similar names
+are the same project. Unverified possible matches remain separate for review.
+
 Keep annotated files in `outputs/catalogue-review-<date>/` within the
 repository. That folder is ignored by Git, so comments stay local until you
 choose to share them; back it up if needed.
@@ -17,6 +24,7 @@ From the repository root, generate the first table:
 uv run plugin-catalogue review \
   --input plugin-catalogue.json \
   --reference /path/to/original/plugin-registry.json \
+  --moves docs/catalogue_review_moves.json \
   --output outputs/catalogue-review-local/catalogue-review.csv
 ```
 
@@ -25,15 +33,17 @@ The original `plugin-registry.json` from `plugin-registry/collapsed` commit
 reference. A later snapshot can instead be used to review a monthly change.
 The command does not contact GitHub or modify `plugin-catalogue.json`.
 
-Filter by `Review group`, then work through `Reference plugin absent`, `Hidden
-plugin`, `New visible`, and `Potential link collision`. The `Audit flags`
+Filter by `Review group`, then work through `Moved`, `Reference plugin absent`,
+`Hidden plugin`, `New visible`, and `Potential link collision`. The `Audit flags`
 column includes other differences and warnings. A repeated PyPI URL is a
 review cue, not proof of a bad link. The `pyproject.toml` URL is inferred from
 the stable ID and default branch; check the repository if a project has moved.
 The original-catalogue link appears only for rows that were visible in the
 original snapshot.
 
-Edit these columns in a spreadsheet application and save as UTF-8 CSV:
+Edit these columns in the review workbook. If refreshing the table yourself
+with the CLI, export the annotated `Review` sheet as UTF-8 CSV first and pass
+that file as `--previous`; the CLI does not read `.xlsx` directly:
 
 - `Reviewer verdict`: `Looks right`, `Should be hidden`, `Should be excluded`,
   `Should be visible`, `Metadata wrong`, or `Needs research`.
@@ -49,6 +59,7 @@ and validates it before replacing it atomically:
 uv run plugin-catalogue review \
   --input plugin-catalogue.json \
   --reference /path/to/original/plugin-registry.json \
+  --moves docs/catalogue_review_moves.json \
   --previous outputs/catalogue-review-local/catalogue-review.csv \
   --output outputs/catalogue-review-local/catalogue-review.csv
 ```
@@ -59,3 +70,6 @@ in `Prior-review only`, so its comments are not lost. Keep a backup of the
 annotated CSV when sharing or regenerating it. Review verdicts do not directly
 change catalogue output: confirmed findings become tested crawler/policy fixes
 or explicit reviewed curation, followed by a new crawl and comparison.
+For a moved ID, a comment on either the original or current ID is carried into
+the single row. Conflicting comments on both IDs make regeneration fail rather
+than silently discarding either one.

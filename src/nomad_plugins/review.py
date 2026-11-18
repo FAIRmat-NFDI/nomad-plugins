@@ -6,6 +6,7 @@ import os
 import re
 import tempfile
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote
 
@@ -30,11 +31,14 @@ REVIEW_COLUMNS = (
     'Review group',
     'Name',
     'Stable ID',
+    'Original stable ID',
     'Presence',
     'Visibility',
     'Visibility reason',
+    'Move basis',
     *REVIEW_FIELDS,
     'Repository URL',
+    'Original repository URL',
     'pyproject.toml URL',
     'Documentation URL',
     'PyPI URL',
@@ -52,6 +56,7 @@ REVIEW_COLUMNS = (
     'Warnings',
 )
 GROUP_ORDER = (
+    'Moved',
     'Reference plugin absent',
     'Hidden plugin',
     'Potential link collision',
@@ -62,6 +67,43 @@ GROUP_ORDER = (
     'Reference-only non-plugin',
     'Prior-review only',
 )
+
+
+@dataclass(frozen=True)
+class ReviewMove:
+    original_id: str
+    current_id: str
+    basis: str
+
+
+def load_review_moves(path: Path | None) -> dict[str, ReviewMove]:
+    """Load explicit, one-to-one ID moves for a particular comparison."""
+    if path is None:
+        return {}
+    data = json.loads(path.read_text(encoding='utf-8'))
+    entries = data['moves']
+    if not isinstance(entries, list):
+        raise ValueError('Review moves must be a list.')
+    moves = {}
+    target_ids = set()
+    for entry in entries:
+        original_id = entry['originalId']
+        current_id = entry['currentId']
+        basis = entry['basis']
+        if not all(
+            isinstance(value, str) and value.strip()
+            for value in (original_id, current_id, basis)
+        ):
+            raise ValueError('Review moves require non-empty IDs and basis.')
+        old_key = original_id.casefold()
+        new_key = current_id.casefold()
+        if old_key == new_key or old_key in moves or new_key in target_ids:
+            raise ValueError(
+                f'Duplicate or self-referential move: {original_id} => {current_id}'
+            )
+        moves[old_key] = ReviewMove(original_id, current_id, basis)
+        target_ids.add(new_key)
+    return moves
 
 
 def load_reference(path: Path | None) -> dict[str, dict]:
@@ -93,6 +135,7 @@ def build_review_rows(  # noqa: PLR0912, PLR0915
     *,
     reference: dict[str, dict] | None = None,
     previous: dict[str, dict[str, str]] | None = None,
+    moves: dict[str, ReviewMove] | None = None,
 ) -> list[dict[str, str]]:
     """Include visible, hidden, missing and previously annotated IDs."""
     current = _index_by_id(
@@ -104,6 +147,18 @@ def build_review_rows(  # noqa: PLR0912, PLR0915
     )
     reference = reference or {}
     previous = previous or {}
+    moves = moves or {}
+    for original_id, move in moves.items():
+        target_id = move.current_id.casefold()
+        if original_id not in reference or original_id in current:
+            raise ValueError(
+                f'Review move source is not original-only: {move.original_id}'
+            )
+        if target_id not in current or target_id in reference:
+            raise ValueError(
+                f'Review move target is not current-only: {move.current_id}'
+            )
+    moves_by_current = {move.current_id.casefold(): move for move in moves.values()}
     pypi_repositories: dict[str, set[str]] = {}
     for plugin in current.values():
         pypi_url = plugin.get('pypiUrl')
@@ -116,13 +171,18 @@ def build_review_rows(  # noqa: PLR0912, PLR0915
     }
 
     rows = []
-    for stable_id in current.keys() | reference.keys() | previous.keys():
+    review_ids = (current.keys() | reference.keys() | previous.keys()) - moves.keys()
+    for stable_id in review_ids:
+        move = moves_by_current.get(stable_id)
         plugin = current.get(stable_id)
-        original = reference.get(stable_id)
+        original = reference.get(move.original_id.casefold() if move else stable_id)
         prior = previous.get(stable_id, {})
+        prior_original = previous.get(move.original_id.casefold(), {}) if move else {}
         source = plugin or original
         flags = []
-        if plugin and original:
+        if move:
+            presence = 'Moved ID'
+        elif plugin and original:
             presence = 'Current and original'
         elif plugin:
             presence = 'Current only'
@@ -148,7 +208,9 @@ def build_review_rows(  # noqa: PLR0912, PLR0915
             visibility = 'Absent'
             reasons = []
 
-        if not plugin and original and original['projectKind'] == 'plugin':
+        if move:
+            group = 'Moved'
+        elif not plugin and original and original['projectKind'] == 'plugin':
             group = 'Reference plugin absent'
         elif (
             plugin
@@ -177,12 +239,17 @@ def build_review_rows(  # noqa: PLR0912, PLR0915
                 'Review group': group,
                 'Name': source['name'] if source else prior.get('Name', ''),
                 'Stable ID': source['id'] if source else prior['Stable ID'],
+                'Original stable ID': original['id'] if move else '',
                 'Presence': presence,
                 'Visibility': visibility,
                 'Visibility reason': '; '.join(reasons),
+                'Move basis': move.basis if move else '',
                 'Repository URL': source.get('repositoryUrl', '')
                 if source
                 else prior.get('Repository URL', ''),
+                'Original repository URL': original.get('repositoryUrl', '')
+                if original
+                else prior.get('Original repository URL', ''),
                 'pyproject.toml URL': _pyproject_url(source)
                 if source
                 else prior.get('pyproject.toml URL', ''),
@@ -223,7 +290,14 @@ def build_review_rows(  # noqa: PLR0912, PLR0915
             }
         )
         for column in REVIEW_FIELDS:
-            row[column] = prior.get(column, '')
+            current_value = prior.get(column, '')
+            original_value = prior_original.get(column, '')
+            if current_value and original_value and current_value != original_value:
+                raise ValueError(
+                    f'Conflicting reviewer values for moved ID {row["Stable ID"]}: '
+                    f'{column}'
+                )
+            row[column] = current_value or original_value
         rows.append(row)
 
     order = {group: rank for rank, group in enumerate(GROUP_ORDER)}

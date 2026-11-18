@@ -16,6 +16,7 @@ from nomad_plugins.review import (
     build_review_rows,
     load_previous_review,
     load_reference,
+    load_review_moves,
     review_summary,
     write_review_csv,
 )
@@ -196,6 +197,12 @@ def validate(input_path: Path, schema_path: Path) -> None:
     help='Existing review CSV whose reviewer columns should be retained by ID.',
 )
 @click.option(
+    '--moves',
+    'moves_path',
+    type=click.Path(path_type=Path, dir_okay=False, exists=True),
+    help='Optional JSON of verified original-to-current ID moves.',
+)
+@click.option(
     '--output',
     required=True,
     type=click.Path(path_type=Path, dir_okay=False),
@@ -205,6 +212,7 @@ def review(
     input_path: Path,
     reference_path: Path | None,
     previous_path: Path | None,
+    moves_path: Path | None,
     output: Path,
 ) -> None:
     """Create a sortable review table, including hidden and absent records."""
@@ -212,7 +220,10 @@ def review(
         snapshot = validate_catalogue_file(input_path)
         reference = load_reference(reference_path)
         previous = load_previous_review(previous_path)
-        rows = build_review_rows(snapshot, reference=reference, previous=previous)
+        moves = load_review_moves(moves_path)
+        rows = build_review_rows(
+            snapshot, reference=reference, previous=previous, moves=moves
+        )
         write_review_csv(rows, output)
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc

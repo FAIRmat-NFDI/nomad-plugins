@@ -57,6 +57,11 @@ overlaps, and final exported project kinds without changing the JSON output.
 See the [configuration and diagnostics guide](docs/how_to/use_this_plugin.md)
 for repository-search limits and exclusion reporting.
 
+To compare a snapshot with an earlier catalogue and annotate visible, hidden,
+or missing records, use `plugin-catalogue review`. See the
+[baseline review guide](docs/catalogue_review.md) for the repeatable CSV review
+workflow.
+
 ## Main contributors
 | Name | E-mail     |
 |------|------------|

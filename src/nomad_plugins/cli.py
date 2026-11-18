@@ -12,6 +12,13 @@ from nomad_plugins.catalogue import (
 )
 from nomad_plugins.config import load_catalogue_config
 from nomad_plugins.crawler import Plugin, SearchCandidateAudit, find_plugins
+from nomad_plugins.review import (
+    build_review_rows,
+    load_previous_review,
+    load_reference,
+    review_summary,
+    write_review_csv,
+)
 
 
 @click.group()
@@ -166,6 +173,52 @@ def validate(input_path: Path, schema_path: Path) -> None:
         f'Validated catalogue snapshot with {len(snapshot.plugins)} record(s) '
         f'in {input_path}.'
     )
+
+
+@main.command('review')
+@click.option(
+    '--input',
+    'input_path',
+    required=True,
+    type=click.Path(path_type=Path, dir_okay=False, exists=True),
+    help='Current catalogue snapshot JSON.',
+)
+@click.option(
+    '--reference',
+    'reference_path',
+    type=click.Path(path_type=Path, dir_okay=False, exists=True),
+    help='Optional earlier catalogue JSON to compare by stable ID.',
+)
+@click.option(
+    '--previous',
+    'previous_path',
+    type=click.Path(path_type=Path, dir_okay=False, exists=True),
+    help='Existing review CSV whose reviewer columns should be retained by ID.',
+)
+@click.option(
+    '--output',
+    required=True,
+    type=click.Path(path_type=Path, dir_okay=False),
+    help='Review CSV to write. The same file may be used as --previous.',
+)
+def review(
+    input_path: Path,
+    reference_path: Path | None,
+    previous_path: Path | None,
+    output: Path,
+) -> None:
+    """Create a sortable review table, including hidden and absent records."""
+    try:
+        snapshot = validate_catalogue_file(input_path)
+        reference = load_reference(reference_path)
+        previous = load_previous_review(previous_path)
+        rows = build_review_rows(snapshot, reference=reference, previous=previous)
+        write_review_csv(rows, output)
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f'Wrote {len(rows)} review rows to {output}.')
+    for group, count in review_summary(rows).items():
+        click.echo(f'  {group}: {count}')
 
 
 if __name__ == '__main__':

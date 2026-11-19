@@ -61,11 +61,13 @@ GitHub account type and update `ownerSearches` explicitly; do not automatically
 expand the list from unreviewed search results. Owner-scoped searches remain
 bounded and do not replace a future direct refresh of known repositories.
 
-A valid PEP 621 project qualifies when it contains a
-`[project.entry-points."nomad.plugin"]` table (including an empty table), or
-declares `nomad-lab` in runtime or optional dependencies. Dependency names use
-the existing normalization rules. Mentions in comments, descriptions, or URLs
-do not qualify. No Poetry or YAML fallback is used.
+Repository and owner-search candidates, as well as manual seeds, require a
+valid PEP 621 project with a `[project.entry-points."nomad.plugin"]` table
+(including an empty table) or a `nomad-lab` runtime or optional dependency.
+Code search is textual and can also retain a valid project whose match was
+only in a comment, description, or URL. See [catalogue discovery and
+visibility](../explanation/explanation.md) for the classification and hiding
+rules. No Poetry or YAML fallback is used.
 
 Root files and parsed metadata are reused across overlapping queries. A root
 already discovered by code search is processed through that existing path.
@@ -97,11 +99,12 @@ The packaged candidate exclusions include two temporary test repositories
 surfaced by owner search; their metadata describes them as tests/removable.
 
 `deploymentSources` names the central and example Oasis `/info` endpoints.
-The crawler reads their installed `plugin_packages` and checks PyPI's project
-JSON API before emitting a PyPI link. A failed or malformed deployment response,
-or an indeterminate PyPI response, aborts the crawl without replacing an
-existing output file; only a confirmed PyPI 404 means the package is absent.
-This prevents source outages from being recorded as confirmed `false` values.
+The crawler reads their installed `plugin_packages`. It emits a PyPI link only
+when PyPI's project JSON metadata links to the discovered GitHub repository;
+matching the package name alone is insufficient. A PyPI 404 or metadata without
+a matching repository leaves the link empty. Failed or malformed deployment or
+PyPI responses abort the crawl without replacing an existing output file.
+This prevents source outages from being recorded as confirmed missing links.
 
 ## Interpret discovery diagnostics
 

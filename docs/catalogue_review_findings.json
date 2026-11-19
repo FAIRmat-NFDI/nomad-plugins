@@ -24,6 +24,43 @@
         "src/nomad_plugins/crawler.py",
         "src/nomad_plugins/plugin_catalogue_config.json"
       ]
+    },
+    {
+      "caseId": "pypi-name-collisions",
+      "status": "Code fix implemented; live recrawl pending",
+      "affectedStableIds": [
+        "github.com/mado89/nomad-parser-plugin-cube",
+        "github.com/mammos-project/nomad-mammos-plugin",
+        "github.com/konto1998/fairtool",
+        "github.com/neelravi/fairtool",
+        "github.com/larsvdbrandt/nomadrobotlab#nomad-develop/nomad-source",
+        "github.com/neelravi/nomad-fair",
+        "github.com/fairmat-nfdi/nomad-measurements",
+        "github.com/siamakn/temp-nomad-onboarding-workshop"
+      ],
+      "finding": "The baseline assigns the same PyPI URL to records from different repositories when their pyproject package names match. Some links therefore point to an unrelated distribution or the upstream distribution of a copy.",
+      "mechanism": "The previous enrichment checked only whether a package name existed on PyPI.",
+      "implementedHandling": "Emit a PyPI URL only when the package metadata links to the discovered GitHub repository. Keep the URL empty when the name exists but repository evidence does not match; preserve API failure as a crawl error.",
+      "observedPypiRepositories": {
+        "cube": [],
+        "fairtool": ["github.com/neelravi/fairtool"],
+        "nomad-lab": [],
+        "nomad-measurements": ["github.com/fairmat-nfdi/nomad-measurements"]
+      },
+      "unverified": "The updated PyPI links and omissions in a fresh live crawl; the committed baseline still reflects the earlier rule.",
+      "evidenceUrls": [
+        "https://docs.pypi.org/api/json/",
+        "https://pypi.org/project/cube/",
+        "https://pypi.org/project/fairtool/",
+        "https://pypi.org/project/nomad-lab/",
+        "https://pypi.org/project/nomad-measurements/"
+      ],
+      "localEvidence": [
+        "plugin-catalogue.json",
+        "src/nomad_plugins/crawler.py",
+        "tests/test_curation.py",
+        "tests/test_pyproject.py"
+      ]
     }
   ]
 }

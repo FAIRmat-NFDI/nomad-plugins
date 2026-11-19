@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import click
 import httpx
@@ -238,20 +238,62 @@ async def get_toml_project(
         return None
 
 
-async def package_exists_on_pypi(package_name: str) -> bool:
-    """Return whether PyPI currently has a project with this name."""
+def _github_repository_from_url(url: str) -> str | None:
+    try:
+        parsed = urlparse(url.strip())
+        hostname = parsed.hostname
+    except ValueError:
+        return None
+    if parsed.scheme not in {'http', 'https'} or hostname not in {
+        'github.com',
+        'www.github.com',
+    }:
+        return None
+    parts = parsed.path.strip('/').split('/')
+    if len(parts) < 2 or not parts[0] or not parts[1]:  # noqa: PLR2004
+        return None
+    repository = parts[1].removesuffix('.git')
+    if not repository:
+        return None
+    return f'github.com/{parts[0]}/{repository}'.casefold()
+
+
+async def pypi_project_repositories(package_name: str) -> frozenset[str] | None:
+    """Return GitHub repositories linked by PyPI metadata, or None for a 404."""
     async with httpx.AsyncClient() as client:
         try:
             url = f'https://pypi.org/pypi/{quote(package_name, safe="")}/json'
             response = await client.get(url)
             if response.status_code == 404:  # noqa: PLR2004
-                return False
+                return None
             response.raise_for_status()
-            return True
         except (httpx.RequestError, httpx.HTTPStatusError) as exc:
             raise EnrichmentError(
-                f'PyPI availability could not be checked for {package_name!r}: {exc}'
+                f'PyPI metadata could not be checked for {package_name!r}: {exc}'
             ) from exc
+
+    try:
+        info = response.json()['info']
+        if not isinstance(info, dict):
+            raise ValueError('info must be an object')
+        project_urls = info.get('project_urls') or {}
+        home_page = info.get('home_page')
+        if not isinstance(project_urls, dict) or any(
+            not isinstance(value, str) for value in project_urls.values()
+        ):
+            raise ValueError('info.project_urls must contain URL strings')
+        if home_page is not None and not isinstance(home_page, str):
+            raise ValueError('info.home_page must be a URL string or null')
+    except (KeyError, TypeError, ValueError) as exc:
+        raise EnrichmentError(
+            f'PyPI metadata for {package_name!r} has invalid project URLs: {exc}'
+        ) from exc
+    urls = [*project_urls.values(), *([home_page] if home_page else [])]
+    return frozenset(
+        repository
+        for value in urls
+        if (repository := _github_repository_from_url(value)) is not None
+    )
 
 
 async def get_plugin(  # noqa: PLR0913
@@ -262,7 +304,7 @@ async def get_plugin(  # noqa: PLR0913
     central_plugins: set[str],
     example_oasis_plugins: set[str],
     project: PyProjectTOML | None = None,
-    pypi_lookup: Callable[[str], Awaitable[bool]] | None = None,
+    pypi_lookup: Callable[[str], Awaitable[frozenset[str] | None]] | None = None,
 ) -> Plugin | None:
     """Build one public plugin record from a discovered pyproject."""
     if project is None:
@@ -271,7 +313,11 @@ async def get_plugin(  # noqa: PLR0913
         return None
 
     name = project.name
-    on_pypi = await (pypi_lookup or package_exists_on_pypi)(name)
+    pypi_repositories = await (pypi_lookup or pypi_project_repositories)(name)
+    matching_pypi_repository = (
+        pypi_repositories is not None
+        and f'github.com/{item.repository.full_name}'.casefold() in pypi_repositories
+    )
     entrypoints = project.entry_points.nomad_plugin if project.entry_points else []
     dependencies = normalize_dependencies(project.all_dependencies or set())
     repository_url = str(item.repository.html_url)
@@ -290,7 +336,9 @@ async def get_plugin(  # noqa: PLR0913
         description=project.description or '',
         repository_url=item.repository.html_url,
         documentation_url=project.urls.documentation,
-        pypi_url=f'https://pypi.org/project/{name}/' if on_pypi else None,
+        pypi_url=(
+            f'https://pypi.org/project/{name}/' if matching_pypi_repository else None
+        ),
         owner=repository.owner.login,
         owner_type=repository.owner.type,
         entrypoints=entrypoints,
@@ -718,16 +766,16 @@ async def _find_plugins(
     repositories = dict(zip(sorted(repository_names), repository_details, strict=True))
 
     official_roots = {row.repository.casefold() for row, _ in official_rows}
-    pypi_tasks: dict[str, asyncio.Task[bool]] = {}
+    pypi_tasks: dict[str, asyncio.Task[frozenset[str] | None]] = {}
     pypi_limit = asyncio.Semaphore(10)
 
-    async def cached_pypi_lookup(name: str) -> bool:
+    async def cached_pypi_lookup(name: str) -> frozenset[str] | None:
         normalized_name = normalize_dependency_name(name)
         if normalized_name not in pypi_tasks:
 
-            async def check() -> bool:
+            async def check() -> frozenset[str] | None:
                 async with pypi_limit:
-                    return await package_exists_on_pypi(name)
+                    return await pypi_project_repositories(name)
 
             pypi_tasks[normalized_name] = asyncio.create_task(check())
         return await pypi_tasks[normalized_name]

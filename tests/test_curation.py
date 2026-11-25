@@ -24,7 +24,7 @@ from nomad_plugins.crawler import (
     fetch_nomad_deployment_packages,
     find_plugins,
     load_manual_project_seeds,
-    package_exists_on_pypi,
+    pypi_project_repositories,
 )
 from nomad_plugins.github import GitHubClient, GitHubNotFoundError
 from nomad_plugins.pyproject import parse_pyproject
@@ -232,8 +232,8 @@ def test_configured_official_rows_and_manual_seeds_merge_with_crawl():
             new=AsyncMock(return_value={'official-core'}),
         ),
         patch(
-            'nomad_plugins.crawler.package_exists_on_pypi',
-            new=AsyncMock(return_value=False),
+            'nomad_plugins.crawler.pypi_project_repositories',
+            new=AsyncMock(return_value=None),
         ),
     ):
         result = asyncio.run(run())
@@ -317,7 +317,7 @@ def test_discovered_official_root_does_not_require_pyproject_or_pypi():
             new=AsyncMock(return_value=set()),
         ),
         patch(
-            'nomad_plugins.crawler.package_exists_on_pypi',
+            'nomad_plugins.crawler.pypi_project_repositories',
             new=AsyncMock(side_effect=AssertionError('PyPI must not be queried')),
         ),
     ):
@@ -385,14 +385,37 @@ def test_deployment_info_rejects_failed_or_malformed_sources():
             asyncio.run(fetch_nomad_deployment_packages(url))
 
 
-@pytest.mark.parametrize('status,expected', [(200, True), (404, False)])
-def test_pypi_link_requires_confirmed_package_status(status, expected):
-    def handler(_request):
-        return httpx.Response(status)
+@pytest.mark.parametrize(
+    ('status', 'project_urls', 'expected'),
+    [
+        (
+            200,
+            {'Source': 'https://github.com/Example/Nomad_Plugin.git'},
+            frozenset({'github.com/example/nomad_plugin'}),
+        ),
+        (200, {'Documentation': 'https://example.org/docs'}, frozenset()),
+        (404, None, None),
+    ],
+)
+def test_pypi_metadata_identifies_linked_repositories(status, project_urls, expected):
+    def handler(request):
+        assert request.url.path == '/pypi/Nomad_Plugin/json'
+        return httpx.Response(status, json={'info': {'project_urls': project_urls}})
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     with patch('nomad_plugins.crawler.httpx.AsyncClient', return_value=client):
-        assert asyncio.run(package_exists_on_pypi('Nomad_Plugin')) is expected
+        assert asyncio.run(pypi_project_repositories('Nomad_Plugin')) == expected
+
+
+def test_pypi_metadata_rejects_malformed_response():
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(200, json={'info': []})
+        )
+    )
+    with patch('nomad_plugins.crawler.httpx.AsyncClient', return_value=client):
+        with pytest.raises(EnrichmentError, match='invalid project URLs'):
+            asyncio.run(pypi_project_repositories('nomad-plugin'))
 
 
 def test_pypi_failure_is_not_treated_as_missing():
@@ -400,8 +423,8 @@ def test_pypi_failure_is_not_treated_as_missing():
         transport=httpx.MockTransport(lambda _request: httpx.Response(503))
     )
     with patch('nomad_plugins.crawler.httpx.AsyncClient', return_value=client):
-        with pytest.raises(EnrichmentError, match='PyPI availability'):
-            asyncio.run(package_exists_on_pypi('nomad-plugin'))
+        with pytest.raises(EnrichmentError, match='PyPI metadata'):
+            asyncio.run(pypi_project_repositories('nomad-plugin'))
 
 
 def test_enrichment_failure_preserves_existing_catalogue(tmp_path):

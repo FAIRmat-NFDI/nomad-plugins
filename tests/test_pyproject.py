@@ -2,7 +2,7 @@ import asyncio
 import warnings
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -247,27 +247,37 @@ example_parser = "example.parsers:parser_entry_point"
     )
     github_client = SimpleNamespace()
 
-    with (
-        patch(
-            'nomad_plugins.crawler.get_toml_project',
-            new=AsyncMock(return_value=project),
-        ),
-        patch(
-            'nomad_plugins.crawler.package_exists_on_pypi',
-            new=AsyncMock(return_value=True),
-        ),
-    ):
-        plugin = asyncio.run(
-            get_plugin(
-                item=item,
-                github_client=github_client,
-                repository=repository_details,
-                central_plugins=set(),
-                example_oasis_plugins=set(),
-            )
+    plugin = asyncio.run(
+        get_plugin(
+            item=item,
+            github_client=github_client,
+            repository=repository_details,
+            central_plugins=set(),
+            example_oasis_plugins=set(),
+            project=project,
+            pypi_lookup=AsyncMock(
+                return_value=frozenset({'github.com/example/discovered'})
+            ),
         )
+    )
+
+    unrelated_pypi_project = asyncio.run(
+        get_plugin(
+            item=item,
+            github_client=github_client,
+            repository=repository_details,
+            central_plugins=set(),
+            example_oasis_plugins=set(),
+            project=project,
+            pypi_lookup=AsyncMock(
+                return_value=frozenset({'github.com/example/other-project'})
+            ),
+        )
+    )
 
     assert plugin is not None
+    assert unrelated_pypi_project is not None
+    assert unrelated_pypi_project.pypi_url is None
     assert plugin.id == 'github.com/example/discovered#packages/parser'
     assert str(plugin.repository_url) == 'https://github.com/example/discovered'
     assert plugin.project_path == 'packages/parser'

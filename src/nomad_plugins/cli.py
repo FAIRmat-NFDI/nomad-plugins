@@ -12,6 +12,15 @@ from nomad_plugins.catalogue import (
 )
 from nomad_plugins.config import load_catalogue_config
 from nomad_plugins.crawler import Plugin, SearchCandidateAudit, find_plugins
+from nomad_plugins.review import (
+    build_review_rows,
+    load_previous_review,
+    load_reference,
+    load_review_moves,
+    review_summary,
+    write_review_csv,
+)
+from nomad_plugins.review_html import load_audit_findings, write_review_html
 
 
 @click.group()
@@ -166,6 +175,86 @@ def validate(input_path: Path, schema_path: Path) -> None:
         f'Validated catalogue snapshot with {len(snapshot.plugins)} record(s) '
         f'in {input_path}.'
     )
+
+
+@main.command('review')
+@click.option(
+    '--input',
+    'input_path',
+    required=True,
+    type=click.Path(path_type=Path, dir_okay=False, exists=True),
+    help='Current catalogue snapshot JSON.',
+)
+@click.option(
+    '--reference',
+    'reference_path',
+    type=click.Path(path_type=Path, dir_okay=False, exists=True),
+    help='Optional earlier catalogue JSON to compare by stable ID.',
+)
+@click.option(
+    '--previous',
+    'previous_path',
+    type=click.Path(path_type=Path, dir_okay=False, exists=True),
+    help='Existing review CSV or exported review JSON to retain reviewer fields by ID.',
+)
+@click.option(
+    '--moves',
+    'moves_path',
+    type=click.Path(path_type=Path, dir_okay=False, exists=True),
+    help='Optional JSON of verified original-to-current ID moves.',
+)
+@click.option(
+    '--audit-findings',
+    'findings_path',
+    type=click.Path(path_type=Path, dir_okay=False, exists=True),
+    help='Optional agent findings JSON to embed in an HTML review.',
+)
+@click.option(
+    '--output',
+    required=True,
+    type=click.Path(path_type=Path, dir_okay=False),
+    help='Review file to write: .html for an offline browser page, otherwise CSV.',
+)
+def review(  # noqa: PLR0913
+    *,
+    input_path: Path,
+    reference_path: Path | None,
+    previous_path: Path | None,
+    moves_path: Path | None,
+    findings_path: Path | None,
+    output: Path,
+) -> None:
+    """Create an offline HTML review or CSV, including hidden and absent records."""
+    try:
+        snapshot = validate_catalogue_file(input_path)
+        reference = load_reference(reference_path) if reference_path else None
+        previous = load_previous_review(previous_path)
+        moves = load_review_moves(moves_path)
+        rows = build_review_rows(
+            snapshot, reference=reference, previous=previous, moves=moves
+        )
+        if output.suffix.lower() in {'.html', '.htm'}:
+            write_review_html(
+                rows,
+                output,
+                snapshot=snapshot,
+                reference=reference,
+                findings=load_audit_findings(findings_path),
+                saved_review=(
+                    json.loads(previous_path.read_text(encoding='utf-8'))
+                    if previous_path and previous_path.suffix.lower() == '.json'
+                    else None
+                ),
+            )
+        else:
+            if findings_path is not None:
+                raise ValueError('--audit-findings requires an HTML output file.')
+            write_review_csv(rows, output)
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f'Wrote {len(rows)} review rows to {output}.')
+    for group, count in review_summary(rows).items():
+        click.echo(f'  {group}: {count}')
 
 
 if __name__ == '__main__':

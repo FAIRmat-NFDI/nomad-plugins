@@ -131,3 +131,6 @@ dmypy.json
 
 # uv
 uv.lock
+
+# Generated local review pages and reviewer decisions
+/outputs/catalogue-review-*/

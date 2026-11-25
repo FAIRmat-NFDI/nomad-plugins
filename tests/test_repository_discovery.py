@@ -96,8 +96,8 @@ def _run_crawl(handler, config=None):
             new=AsyncMock(return_value=set()),
         ),
         patch(
-            'nomad_plugins.crawler.package_exists_on_pypi',
-            new=AsyncMock(return_value=False),
+            'nomad_plugins.crawler.pypi_project_repositories',
+            new=AsyncMock(return_value=None),
         ),
     ):
         return asyncio.run(run())

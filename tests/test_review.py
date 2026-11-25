@@ -101,6 +101,18 @@ def test_review_flags_pypi_link_shared_by_different_repositories():
     )
 
 
+@pytest.mark.parametrize(
+    ('reference', 'expected_group'),
+    [(None, 'Other visible'), ({}, 'New visible')],
+)
+def test_new_visible_requires_a_reference_snapshot(reference, expected_group):
+    snapshot = build_catalogue_snapshot([_plugin('alpha')])
+
+    rows = build_review_rows(snapshot, reference=reference)
+
+    assert rows[0]['Review group'] == expected_group
+
+
 def test_review_command_writes_and_regenerates_annotated_csv(tmp_path):
     snapshot_path = tmp_path / 'catalogue.json'
     review_path = tmp_path / 'review.csv'
@@ -113,7 +125,7 @@ def test_review_command_writes_and_regenerates_annotated_csv(tmp_path):
         main, ['review', '--input', str(snapshot_path), '--output', str(review_path)]
     )
     assert first.exit_code == 0, first.output
-    assert 'New visible: 1' in first.output
+    assert 'Other visible: 1' in first.output
     with review_path.open(encoding='utf-8-sig', newline='') as stream:
         rows = list(csv.DictReader(stream))
     rows[0]['Reviewer comment'] = 'Check package identity'

@@ -172,6 +172,7 @@ def build_review_rows(  # noqa: PLR0912, PLR0915
         ],
         source='current snapshot',
     )
+    has_reference = reference is not None
     reference = reference or {}
     previous = previous or {}
     moves = moves or {}
@@ -247,7 +248,7 @@ def build_review_rows(  # noqa: PLR0912, PLR0915
             group = 'Hidden plugin'
         elif 'PyPI URL shared by different repositories' in flags:
             group = 'Potential link collision'
-        elif plugin and not original and plugin['registryVisible']:
+        elif has_reference and plugin and not original and plugin['registryVisible']:
             group = 'New visible'
         elif 'Project kind changed' in flags or 'Plugin types changed' in flags:
             group = 'Changed classification or types'

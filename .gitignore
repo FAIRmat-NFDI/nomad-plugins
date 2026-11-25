@@ -132,5 +132,5 @@ dmypy.json
 # uv
 uv.lock
 
-# Local, annotated catalogue review workbooks and CSV files
+# Generated local review pages and reviewer decisions
 /outputs/catalogue-review-*/

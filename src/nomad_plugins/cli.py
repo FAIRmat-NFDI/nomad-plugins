@@ -227,7 +227,7 @@ def review(  # noqa: PLR0913
     """Create an offline HTML review or CSV, including hidden and absent records."""
     try:
         snapshot = validate_catalogue_file(input_path)
-        reference = load_reference(reference_path)
+        reference = load_reference(reference_path) if reference_path else None
         previous = load_previous_review(previous_path)
         moves = load_review_moves(moves_path)
         rows = build_review_rows(

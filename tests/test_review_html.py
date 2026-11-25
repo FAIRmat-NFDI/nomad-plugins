@@ -69,6 +69,37 @@ def test_source_fingerprint_changes_only_for_source_evidence():
     assert build_review_payload(rows, snapshot)['records'][0]['fingerprint'] != initial
 
 
+@pytest.mark.parametrize('reference', [None, {}])
+def test_html_distinguishes_absent_reference_from_empty_snapshot(reference):
+    snapshot = _snapshot()
+    rows = build_review_rows(snapshot, reference=reference)
+
+    payload = build_review_payload(rows, snapshot, reference=reference)
+
+    assert payload['hasReference'] is (reference is not None)
+
+
+def test_html_review_cli_requires_no_auxiliary_files(tmp_path):
+    input_path = tmp_path / 'catalogue.json'
+    output = tmp_path / 'index.html'
+    write_catalogue_snapshot(_snapshot(), input_path)
+
+    result = CliRunner().invoke(
+        main, ['review', '--input', str(input_path), '--output', str(output)]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert 'Other visible: 1' in result.output
+    html = output.read_text(encoding='utf-8')
+    encoded = re.search(r'id="review-data">(.*?)</script>', html, re.DOTALL)
+    assert encoded is not None
+    payload = json.loads(encoded[1])
+    assert payload['hasReference'] is False
+    assert payload['findings'] == []
+    assert payload['savedReview'] is None
+    assert payload['records'][0]['row']['Review group'] == 'Other visible'
+
+
 def test_html_review_cli_embeds_agent_findings(tmp_path):
     input_path = tmp_path / 'catalogue.json'
     output = tmp_path / 'index.html'

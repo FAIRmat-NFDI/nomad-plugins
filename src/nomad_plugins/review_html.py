@@ -25,7 +25,7 @@ GROUP_GUIDE = {
     'the repository is archived or a fork. It remains in the JSON.',
     'Potential link collision': 'Different repositories share a PyPI URL. '
     'Check package identity; sharing a URL is not proof of an error.',
-    'New visible': 'A visible current record was not in the reference.',
+    'New visible': 'A visible current record was not in the supplied reference.',
     'Changed classification or types': 'The project kind or plugin types changed '
     'relative to the reference. Inspect the upstream declarations.',
     'Other visible': 'A visible record not assigned to an earlier review group.',
@@ -67,6 +67,7 @@ def build_review_payload(
         )
         for plugin in snapshot.plugins
     }
+    has_reference = reference is not None
     reference = reference or {}
     records = []
     for row in rows:
@@ -94,7 +95,7 @@ def build_review_payload(
         'format': 'nomad-catalogue-review-data',
         'builtAt': datetime.now(timezone.utc).isoformat(),
         'schemaVersion': snapshot.schema_version,
-        'hasReference': bool(reference),
+        'hasReference': has_reference,
         'records': records,
         'findings': findings or [],
         'savedReview': saved_review,

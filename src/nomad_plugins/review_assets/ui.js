@@ -118,7 +118,56 @@
     $('edit-verdict').value = value; persist(); renderStats(); toast('Review saved');
   }
   function renderGuide() {
-    $('guide-view').innerHTML = `<h2>Review guide</h2><div class="guide-grid"><div class="panel"><h3>Review and keep a backup</h3><ol><li>Choose a group, then open a project with Review.</li><li>Compare the snapshots and open the live repository or metadata links.</li><li>Set a verdict and add a comment, expected handling, and evidence.</li><li>Export review JSON regularly. Import it to continue in another browser or after a refresh.</li></ol><p>Autosave belongs to this browser and origin, not the HTML file. Moving the file, clearing browser data, or using private browsing can lose local storage. JSON exports retain conflicts and records no longer in the snapshots.</p></div><div class="panel"><h3>What the data means</h3><p>The embedded baseline is not guaranteed to be fully validated. Generation of this page does not perform a new crawl. Agent findings are separate evidence, not your verdicts.</p><p>Import preserves notes by stable ID, maps verified moves, and flags changed source records for re-review. Conflicting non-empty reviews are retained for you to resolve in the project detail.</p><p>CSV export includes all rows, not just the filtered page. It works with the existing review command’s <code>--previous</code> option. Use JSON for complete backups, including conflict history.</p></div></div><div class="panel"><h3>Review groups</h3><table class="guide-table"><thead><tr><th>Group</th><th>Meaning</th></tr></thead><tbody>${data.groups.map(group => `<tr><td>${escape(group.name)}</td><td>${escape(group.description)}</td></tr>`).join('')}</tbody></table><p>Groups use the first matching category. A moved record can also have a link-collision flag; inspect the flags and source details, not only the group.</p></div><div class="panel"><h3>Classification and hiding rules</h3><ol class="rules"><li>Template/example heuristics run first (for example an <code>examples</code> path, a template name, or a cookiecutter repository), even if entry points exist.</li><li>A parsed <code>nomad.plugin</code> entry point makes the record a plugin.</li><li>Distribution-name and description heuristics run next.</li><li>A <code>nomad-lab</code> runtime or optional dependency makes it a NOMAD-dependent package.</li><li>Anything else is an ecosystem-package fallback. Code-search text alone is not proof of an integration.</li></ol><p>Plugins, dependent packages, and curated official software/templates are visible unless GitHub marks the repository archived or a fork. Distributions, ordinary templates/examples, and fallback ecosystem packages remain hidden in the JSON. Candidate exclusions instead prevent export.</p></div>`;
+    $('guide-view').innerHTML = `<h2>Review guide</h2>
+      <div class="guide-grid">
+        <div class="panel"><h3>Review and save decisions</h3>
+          <ol><li>Choose a group, then open a project with Review.</li>
+            <li>Compare the snapshots and open the live repository or metadata links.</li>
+            <li>Set a verdict and add a comment, expected handling, and evidence.</li>
+            <li>Export review JSON to keep your latest decisions.</li></ol>
+          <p>Use one working folder with <code>index.html</code> and the latest
+            <code>catalogue-review.json</code>. Regenerate the same page and
+            import the latest JSON, or supply it as <code>--previous</code>.
+            Old HTML pages, dated folders, and a history of exported files are not required.</p>
+          <p>Autosave belongs to this browser and origin, not the HTML file.
+            Export before refreshing the page or clearing browser data.
+            Your browser may download JSON elsewhere or add a filename suffix;
+            replace your working copy after the new export succeeds.</p>
+        </div>
+        <div class="panel"><h3>What the data means</h3>
+          <p>The embedded baseline is not guaranteed to be fully validated.
+            Generation of this page does not perform a new crawl.
+            Agent findings are separate evidence, not your verdicts.</p>
+          <p>A reference snapshot is optional comparison data, not a previous review.
+            Without one, visible entries are not labeled as new and no reference-only
+            or changed-metadata rows can be identified.
+            Your latest review JSON contains the saved notes, including notes on
+            records no longer in either snapshot. Import uses verified moves when
+            supplied and flags changed sources or conflicting reviews for you to check.</p>
+          <p>CSV export is optional for other tools. It includes every row and
+            the four reviewer fields, but not source fingerprints or conflict history.</p>
+        </div>
+      </div>
+      <div class="panel"><h3>Review groups</h3>
+        <table class="guide-table"><thead><tr><th>Group</th><th>Meaning</th></tr></thead>
+          <tbody>${data.groups.map(group => `<tr><td>${escape(group.name)}</td><td>${escape(group.description)}</td></tr>`).join('')}</tbody></table>
+        <p>Groups use the first matching category. A moved record can also have
+          a link-collision flag; inspect the flags and source details, not only the group.</p>
+      </div>
+      <div class="panel"><h3>Classification and hiding rules</h3>
+        <ol class="rules">
+          <li>Template/example heuristics run first (for example an <code>examples</code>
+            path, a template name, or a cookiecutter repository), even if entry points exist.</li>
+          <li>A parsed <code>nomad.plugin</code> entry point makes the record a plugin.</li>
+          <li>Distribution-name and description heuristics run next.</li>
+          <li>A <code>nomad-lab</code> runtime or optional dependency makes it a NOMAD-dependent package.</li>
+          <li>Anything else is an ecosystem-package fallback. Code-search text alone is not proof of an integration.</li>
+        </ol>
+        <p>Plugins, dependent packages, and curated official software/templates
+          are visible unless GitHub marks the repository archived or a fork.
+          Distributions, ordinary templates/examples, and fallback ecosystem
+          packages remain hidden in the JSON. Candidate exclusions instead prevent export.</p>
+      </div>`;
   }
   function download(text, name, type) {
     const url = URL.createObjectURL(new Blob([text], {type}));
@@ -171,7 +220,7 @@
     if (next) { openDetail(next.id); } else { closeDetail(); toast('End of the current filtered list'); }
   });
   $('export').addEventListener('click', () => {
-    download(JSON.stringify(core.pack(review), null, 2), `catalogue-review-${new Date().toISOString().slice(0, 10)}.json`, 'application/json');
+    download(JSON.stringify(core.pack(review), null, 2), 'catalogue-review.json', 'application/json');
     unsavedExport = false; toast('Review JSON exported');
   });
   $('export-csv').addEventListener('click', () => download(core.csv(data, review), 'catalogue-review.csv', 'text/csv;charset=utf-8'));

@@ -12,7 +12,7 @@ function fixture(saved = new Map(), options = {}) {
   const id = 'github.com/example/parser';
   const row = {'Stable ID': id, 'Original stable ID': '', 'Name': '<unsafe name>', 'Review group': 'Hidden plugin', 'Visibility': 'Hidden', 'Current kind': 'plugin', 'Visibility reason': 'archived repository', 'Repository URL': 'javascript:bad()'};
   const data = {records: [{id, fingerprint: 'old', row, current: {projectKind: 'plugin', registryVisible: false, status: {archived: true}}, reference: null, initial: Object.fromEntries(core.fields.map(field => [field, '']))}], fields: core.fields, verdicts: core.verdicts, columns: Object.keys(row).concat(core.fields), groups: [{name: 'Hidden plugin', description: 'An archived plugin'}], findings: [], builtAt: '2026-11-24T09:00:00Z', schemaVersion: '2.2.0', hasReference: false};
-  const elements = new Map(), listeners = {};
+  const elements = new Map(), listeners = {}, downloads = [];
   class Element {
     constructor(id) { this.id = id; this.value = ''; this.listeners = {}; this.classes = new Set(); this.classList = {add: name => this.classes.add(name), remove: name => this.classes.delete(name), toggle: (name, enabled) => enabled ? this.classes.add(name) : this.classes.delete(name)}; }
     set innerHTML(html) {
@@ -23,7 +23,7 @@ function fixture(saved = new Map(), options = {}) {
     addEventListener(name, callback) { this.listeners[name] = callback; }
     setAttribute() {}
     append() {}
-    click() {}
+    click() { if (this.download) downloads.push(this.download); }
     showModal() { this.open = true; }
     close() { this.open = false; }
     emit(name, event = {}) { return this.listeners[name]({...event, target: event.target || this}); }
@@ -35,7 +35,7 @@ function fixture(saved = new Map(), options = {}) {
   const context = {CatalogueReview: core, document, localStorage, URL, Blob, console, setTimeout: () => 0, clearTimeout() {}, window: {addEventListener() {}}};
   vm.runInNewContext(source, context);
   const click = dataset => listeners.click({target: {closest: () => ({dataset})}});
-  return {elements, saved, id, click};
+  return {elements, saved, id, click, downloads};
 }
 
 test('UI renders, escapes names, blocks unsafe links and filters the table', () => {
@@ -64,6 +64,14 @@ test('detail edits autosave and survive a fresh UI initialization', () => {
   const restored = fixture(app.saved);
   assert.match(restored.elements.get('table-body').innerHTML, /A useful policy example/);
   assert.match(restored.elements.get('table-body').innerHTML, /Looks right/);
+});
+
+test('review export uses one working filename and guide explains reuse', () => {
+  const app = fixture();
+  app.elements.get('export').emit('click');
+  assert.deepEqual(app.downloads, ['catalogue-review.json']);
+  assert.match(app.elements.get('guide-view').innerHTML, /Use one working folder/);
+  assert.match(app.elements.get('guide-view').innerHTML, /not required/);
 });
 
 test('blocked storage is visible and unreadable existing data is not overwritten', () => {

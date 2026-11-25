@@ -1,5 +1,51 @@
 # Reviewing the catalogue baseline
 
+## Offline browser workspace
+
+Generate a self-contained HTML page to review the catalogue without Excel:
+
+```bash
+uv run plugin-catalogue review \
+  --input plugin-catalogue.json \
+  --reference /path/to/original/plugin-registry.json \
+  --moves docs/catalogue_review_moves.json \
+  --audit-findings docs/catalogue_review_findings.json \
+  --output outputs/catalogue-review-local/index.html
+```
+
+Open `outputs/catalogue-review-local/index.html` in a browser. No server,
+account, network connection, or new crawl is required to use the page.
+Repository, metadata, documentation, and PyPI links open live sources when
+you choose them. The embedded snapshot does not update automatically.
+
+Use the review-group sidebar and the search, visibility, status, project-kind,
+and attention filters to work through the records. Open a project's **Review**
+detail to compare the current and original metadata, inspect move evidence and
+agent findings, and edit your verdict, comment, expected handling, and evidence
+URL. **Save and next** advances within the filtered list. The **Review guide**
+explains every group and the visibility policy; **Agent findings** keeps the
+preliminary agent audit separate from your decisions.
+
+Edits autosave by stable ID in this browser's local storage. They do not modify
+the HTML file, GitHub, the catalogue, or curation rules. Export review JSON
+regularly as a portable backup; browser storage can be lost when clearing
+browser data, using private browsing, or moving to a different file or origin.
+If browser storage is unavailable, the page warns that edits are in memory only.
+
+After generating a fresh page, import your exported review JSON. Notes follow
+verified ID moves, and reviewed records with changed source evidence are
+flagged for re-review. Conflicting reviews retain both versions in the project
+detail; resolve the conflict and choose a verdict again. Annotated IDs absent
+from both snapshots remain as `Prior-review only`. JSON exports preserve this
+history; CSV exports preserve the four reviewer fields but not conflict history.
+
+The generator also accepts a conflict-free exported JSON file as `--previous`
+to seed a new page with notes and source-change markers. An existing CSV is
+still accepted, but it has no source fingerprints for detecting changed
+evidence. Back up browser edits before replacing an HTML page.
+
+## CSV review workflow
+
 The review table is a working audit, not another catalogue schema. It includes
 all current records, whether visible or hidden, plus records from an optional
 reference snapshot that no longer appear. Each row has a stable ID, a review
@@ -41,9 +87,10 @@ the stable ID and default branch; check the repository if a project has moved.
 The original-catalogue link appears only for rows that were visible in the
 original snapshot.
 
-Edit these columns in the review workbook. If refreshing the table yourself
-with the CLI, export the annotated `Review` sheet as UTF-8 CSV first and pass
-that file as `--previous`; the CLI does not read `.xlsx` directly:
+The browser detail form and CSV workflow use these same four reviewer fields.
+If continuing with an older workbook, export its annotated `Review` sheet as
+UTF-8 CSV first and pass that file as `--previous`; the CLI does not read
+`.xlsx` directly:
 
 - `Reviewer verdict`: `Looks right`, `Should be hidden`, `Should be excluded`,
   `Should be visible`, `Metadata wrong`, or `Needs research`.
@@ -75,7 +122,7 @@ the single row. Conflicting comments on both IDs make regeneration fail rather
 than silently discarding either one.
 
 Preliminary agent findings from this baseline review are recorded separately in
-`docs/catalogue_review_findings.json`. The prepared workbook shows them on an
-`Agent audit` tab and marks affected rows in `Audit flags`, leaving the editable
-reviewer fields untouched. These findings are audit notes, not approved curation
-or changes to the generated catalogue.
+`docs/catalogue_review_findings.json`. Pass this as `--audit-findings` when
+generating HTML to show the findings in a separate view and label affected
+records, leaving the editable reviewer fields untouched. These findings are
+audit notes, not approved curation or changes to the generated catalogue.

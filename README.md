@@ -22,6 +22,11 @@ repository searches. Owner membership is a discovery hint, not an endorsement.
 Reviewed curation adds official software/templates and optional manual project
 seeds; live NOMAD deployment and PyPI checks enrich the exported records.
 
+For baseline auditing, the `plugin-catalogue review` command can generate an
+offline HTML workspace with filters, source links, and editable review notes.
+See [reviewing the catalogue baseline](docs/catalogue_review.md) for generation,
+backup, and refresh instructions.
+
 ### Running the crawler
 
 Install the package with e.g. pip:

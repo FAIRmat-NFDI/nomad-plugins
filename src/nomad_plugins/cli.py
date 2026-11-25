@@ -20,6 +20,7 @@ from nomad_plugins.review import (
     review_summary,
     write_review_csv,
 )
+from nomad_plugins.review_html import load_audit_findings, write_review_html
 
 
 @click.group()
@@ -194,7 +195,7 @@ def validate(input_path: Path, schema_path: Path) -> None:
     '--previous',
     'previous_path',
     type=click.Path(path_type=Path, dir_okay=False, exists=True),
-    help='Existing review CSV whose reviewer columns should be retained by ID.',
+    help='Existing review CSV or exported review JSON to retain reviewer fields by ID.',
 )
 @click.option(
     '--moves',
@@ -203,19 +204,27 @@ def validate(input_path: Path, schema_path: Path) -> None:
     help='Optional JSON of verified original-to-current ID moves.',
 )
 @click.option(
+    '--audit-findings',
+    'findings_path',
+    type=click.Path(path_type=Path, dir_okay=False, exists=True),
+    help='Optional agent findings JSON to embed in an HTML review.',
+)
+@click.option(
     '--output',
     required=True,
     type=click.Path(path_type=Path, dir_okay=False),
-    help='Review CSV to write. The same file may be used as --previous.',
+    help='Review file to write: .html for an offline browser page, otherwise CSV.',
 )
-def review(
+def review(  # noqa: PLR0913
+    *,
     input_path: Path,
     reference_path: Path | None,
     previous_path: Path | None,
     moves_path: Path | None,
+    findings_path: Path | None,
     output: Path,
 ) -> None:
-    """Create a sortable review table, including hidden and absent records."""
+    """Create an offline HTML review or CSV, including hidden and absent records."""
     try:
         snapshot = validate_catalogue_file(input_path)
         reference = load_reference(reference_path)
@@ -224,7 +233,23 @@ def review(
         rows = build_review_rows(
             snapshot, reference=reference, previous=previous, moves=moves
         )
-        write_review_csv(rows, output)
+        if output.suffix.lower() in {'.html', '.htm'}:
+            write_review_html(
+                rows,
+                output,
+                snapshot=snapshot,
+                reference=reference,
+                findings=load_audit_findings(findings_path),
+                saved_review=(
+                    json.loads(previous_path.read_text(encoding='utf-8'))
+                    if previous_path and previous_path.suffix.lower() == '.json'
+                    else None
+                ),
+            )
+        else:
+            if findings_path is not None:
+                raise ValueError('--audit-findings requires an HTML output file.')
+            write_review_csv(rows, output)
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(f'Wrote {len(rows)} review rows to {output}.')

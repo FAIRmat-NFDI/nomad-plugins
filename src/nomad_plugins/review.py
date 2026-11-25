@@ -119,6 +119,33 @@ def load_reference(path: Path | None) -> dict[str, dict]:
 def load_previous_review(path: Path | None) -> dict[str, dict[str, str]]:
     if path is None:
         return {}
+    if path.suffix.lower() == '.json':
+        payload = json.loads(path.read_text(encoding='utf-8'))
+        if (
+            payload.get('format') != 'nomad-catalogue-review'
+            or payload.get('version') != 1
+            or not isinstance(payload.get('records'), dict)
+        ):
+            raise ValueError('Not a catalogue review JSON export (version 1).')
+        rows = []
+        for stable_id, record in payload['records'].items():
+            fields = record['fields']
+            if not isinstance(fields, dict) or any(
+                not isinstance(fields.get(key, ''), str) for key in REVIEW_FIELDS
+            ):
+                raise ValueError('Review JSON fields must contain text.')
+            if fields.get('Reviewer verdict', '') not in REVIEW_VERDICTS:
+                raise ValueError('Unknown reviewer verdict in review JSON.')
+            if record.get('conflicts'):
+                raise ValueError(
+                    'Resolve imported conflicts in the browser before using '
+                    'the JSON as --previous.'
+                )
+            row = record['row']
+            if row['Stable ID'].casefold() != stable_id.casefold():
+                raise ValueError('Review row and stable ID disagree.')
+            rows.append({**row, **fields})
+        return _index_by_id(rows, source='previous review')
     with path.open(encoding='utf-8-sig', newline='') as stream:
         reader = csv.DictReader(stream)
         if not reader.fieldnames or not {'Stable ID', *REVIEW_FIELDS}.issubset(

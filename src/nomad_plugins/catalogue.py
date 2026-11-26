@@ -9,13 +9,14 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from nomad_plugins.activity import ActivityWindow
 from nomad_plugins.crawler import Plugin
 from nomad_plugins.transform import ProjectKind
 
 # Schema versioning is independent of the package version.
 # MAJOR: breaking JSON contract changes; MINOR: compatible additions;
 # PATCH: schema/documentation fixes that do not change valid JSON instances.
-SCHEMA_VERSION: Final = '2.2.0'
+SCHEMA_VERSION: Final = '2.3.0'
 DEFAULT_SCHEMA_PATH = Path('plugin-catalogue.schema.json')
 
 
@@ -35,11 +36,17 @@ class CatalogueSnapshot(BaseModel):
         alias='schemaVersion',
     )
     data_updated_at: datetime | None = Field(default=None, alias='dataUpdatedAt')
+    activity_window: ActivityWindow | None = Field(default=None, alias='activityWindow')
     source_summary: CatalogueSourceSummary = Field(alias='sourceSummary')
     plugins: list[Plugin]
 
     @model_validator(mode='after')
     def validate_snapshot(self) -> 'CatalogueSnapshot':
+        if self.activity_window is not None:
+            if self.data_updated_at != self.activity_window.end:
+                raise ValueError('dataUpdatedAt must equal activityWindow.end.')
+        elif any(plugin.status.activity is not None for plugin in self.plugins):
+            raise ValueError('Repository activity requires a global activityWindow.')
         if self.source_summary.plugin_count != len(self.plugins):
             raise ValueError(
                 'sourceSummary.pluginCount must match the number of plugins.'
@@ -88,6 +95,7 @@ def build_catalogue_snapshot(
     plugins: list[Plugin],
     *,
     data_updated_at: datetime | None = None,
+    activity_window: ActivityWindow | None = None,
 ) -> CatalogueSnapshot:
     sorted_plugins = [_normalize_plugin(plugin) for plugin in plugins]
     sorted_plugins.sort(key=_plugin_sort_key)
@@ -99,6 +107,7 @@ def build_catalogue_snapshot(
     return CatalogueSnapshot(
         schema_version=SCHEMA_VERSION,
         data_updated_at=data_updated_at,
+        activity_window=activity_window,
         source_summary=CatalogueSourceSummary(
             plugin_count=len(sorted_plugins),
             registry_visible_count=sum(

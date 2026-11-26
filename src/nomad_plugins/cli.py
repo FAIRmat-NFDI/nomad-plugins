@@ -63,7 +63,13 @@ def crawl(
     try:
         config = load_catalogue_config(config_path)
         result = asyncio.run(find_plugins(github_token, config=config))
-        snapshot = build_catalogue_snapshot(result.plugins)
+        snapshot = build_catalogue_snapshot(
+            result.plugins,
+            data_updated_at=(
+                result.activity_window.end if result.activity_window else None
+            ),
+            activity_window=result.activity_window,
+        )
         write_catalogue_snapshot(snapshot, output)
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
@@ -105,6 +111,16 @@ def crawl(
             )
         if audit_searches:
             _print_search_audit(query_diagnostics.candidates, plugins_by_id)
+    if result.activity_window is not None:
+        repository_count = len(
+            {plugin.id.split('#', 1)[0] for plugin in result.plugins}
+        )
+        click.echo(
+            f'GitHub repository activity: {repository_count} unique repositories; '
+            f'GraphQL cost: {result.activity_query_cost} point(s); '
+            f'window: {result.activity_window.start.isoformat()} to '
+            f'{result.activity_window.end.isoformat()}.'
+        )
     click.echo(f'Unique pyproject.toml candidates: {result.unique_candidate_count}.')
     click.echo(f'Wrote {len(result.plugins)} plugins to {output}')
 

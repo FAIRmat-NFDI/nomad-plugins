@@ -1,4 +1,4 @@
-# Catalogue discovery and visibility
+# Catalogue discovery, visibility, and repository activity
 
 Discovery and visibility are separate decisions. The crawler can retain a
 project in the JSON catalogue while setting `registryVisible` to `false`.
@@ -62,4 +62,51 @@ An invisible record remains in the JSON snapshot. By contrast,
 `excludeCandidates` prevents a search candidate from becoming a record;
 excluding a repository root also excludes its nested candidates. Explicit
 official rows are not removed by that search-candidate exclusion. PyPI links,
-deployment status, stars, and discovery warnings do not determine visibility.
+deployment status, stars, repository activity, and discovery warnings do not
+determine visibility.
+
+## Repository activity, not a maturity score
+
+Schema `2.3.0` adds an optional `status.activity` block for consumers that want
+to sort or filter by repository activity. It does not change discovery,
+classification, visibility, identity, or the deterministic snapshot ordering.
+The existing `status.stars`, `createdAt`, and `lastPushedAt` remain separate.
+
+| Field | Meaning |
+| --- | --- |
+| `status.activity.totalCommits` | Commit count reachable from the sampled default-branch head, as reported by GitHub history. |
+| `status.activity.recentCommits` | Count from that same history restricted to the global `activityWindow.start` / `end` bounds. |
+| `status.activity.lastCommitAt` | Committer timestamp of that default-branch head, not the last push or the latest commit across all branches. |
+| `activityWindow.start` / `end` | One shared UTC interval spanning exactly 180 days, not six calendar months. |
+| `dataUpdatedAt` | Crawl-start timestamp, equal to `activityWindow.end`; it is a common collection cutoff, not a claim that every repository was queried simultaneously. |
+
+Both counts come from the same GitHub GraphQL `Commit` object. The sampled head
+SHA is kept internally during retrieval, but is not a public catalogue field.
+The query asks for history `totalCount` rather than downloading every commit.
+See GitHub's [Commit history reference](https://docs.github.com/en/graphql/reference/commits).
+
+Each unique exported repository is queried once per crawl, including archived,
+forked, and explicitly configured repositories. At most four activity queries
+run concurrently. Root and nested projects from one repository share the same
+activity measurements; these are **not** counts of changes to a nested project's
+directory. The default branch can move during a crawl, and the shared recent
+window excludes later timestamps even when the sampled head has advanced.
+
+The history includes inherited commits, merges, automated changes, and commits
+unrelated to a particular plugin. Copied repositories can inherit substantial
+history, and rewritten history can reduce counts. Stars and commit counts are
+therefore useful signals, not proof of quality, maturity, independent authorship,
+or which repository should be treated as canonical. Ranking and filters belong
+to the consuming interface; no composite score or automatic merge is applied.
+
+A confirmed empty repository has zero counts and no `lastCommitAt`. Missing
+activity in an older or unsampled snapshot means **unknown**, not zero.
+Authentication, transport, HTTP, GraphQL errors (including HTTP 200 with partial
+data), and malformed or inconsistent counts abort a new crawl without replacing
+the previous output. A non-empty repository whose default-branch history cannot
+be read also fails rather than being called inactive.
+
+The CLI reports unique repository count, the sum of GraphQL-reported query
+costs, and the shared window. GraphQL has a separate rate-limit budget from
+REST; retries may add requests beyond the one successful query per repository.
+See GitHub's [GraphQL rate-limit documentation](https://docs.github.com/en/graphql/overview/rate-limits-and-query-limits-for-the-graphql-api).

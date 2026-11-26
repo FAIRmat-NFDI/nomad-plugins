@@ -141,5 +141,31 @@ identifies the query or repository; the existing output is preserved. Only
 HTTP 404 on a supplementary root probe is treated as a normally missing file.
 Malformed TOML or invalid PEP 621 metadata is reported and excluded.
 
-Configured official rows extend the public `metadataSource` values, so this
-snapshot contract uses schema version `2.2.0`.
+The current snapshot contract uses schema version `2.3.0`, including optional
+repository activity metadata. Every full crawl samples default-branch activity
+once per unique exported repository and records a common 180-day UTC window.
+See [repository activity semantics](../explanation/explanation.md#repository-activity-not-a-maturity-score)
+before using these values for sorting or filtering.
+
+## Check activity enrichment live
+
+Before a full crawl, run the bounded, read-only smoke check from the repository
+root in a shell where `GITHUB_TOKEN` is set:
+
+```sh
+uv run python scripts/check_repository_activity.py
+```
+
+This queries three known repositories, including the larger NOMAD repository,
+and prints counts, sampled head, elapsed time, and GraphQL point cost. It does
+not write a catalogue or modify GitHub. You can pass other `owner/name` arguments
+to select the repositories. The sampled head is diagnostic only and is not
+exported in catalogue JSON. A failure should be resolved before attempting the
+full crawl; never interpret unavailable activity as zero.
+
+For the complete sequence from a candidate crawl through comparison, human
+review, and promotion into Git, follow the
+[catalogue refresh audit process](../catalogue_review.md#audit-a-proposed-catalogue-refresh).
+The [2026-11-25 activity audit](../catalogue_activity_audit.md) is a historical
+record of that process, not a required input or a report created automatically
+by the command.

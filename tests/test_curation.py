@@ -169,6 +169,16 @@ def test_manual_project_seed_requires_valid_metadata_and_deduplicates():
 def test_configured_official_rows_and_manual_seeds_merge_with_crawl():
     def handler(request):
         path = request.url.path
+        if path == '/graphql':
+            return httpx.Response(
+                200,
+                json={
+                    'data': {
+                        'repository': {'isEmpty': True, 'defaultBranchRef': None},
+                        'rateLimit': {'cost': 1},
+                    },
+                },
+            )
         if path == '/search/code':
             return httpx.Response(
                 200, json={'total_count': 0, 'incomplete_results': False, 'items': []}
@@ -255,10 +265,22 @@ def test_configured_official_rows_and_manual_seeds_merge_with_crawl():
     assert plugins['github.com/example/core'].project_kind == 'official_software'
     assert plugins['github.com/example/core'].metadata_source == 'crawler-config'
     assert plugins['github.com/example/core'].deployment.on_central
+    assert result.activity_query_cost == len(plugins)
+    assert all(plugin.status.activity.total_commits == 0 for plugin in result.plugins)
 
 
 def test_discovered_official_root_does_not_require_pyproject_or_pypi():
     def handler(request):
+        if request.url.path == '/graphql':
+            return httpx.Response(
+                200,
+                json={
+                    'data': {
+                        'repository': {'isEmpty': True, 'defaultBranchRef': None},
+                        'rateLimit': {'cost': 1},
+                    },
+                },
+            )
         if request.url.path == '/search/code':
             return httpx.Response(
                 200,

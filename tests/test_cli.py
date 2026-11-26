@@ -130,7 +130,7 @@ def test_crawl_writes_deterministic_catalogue_snapshot_json(tmp_path):
         'latest reported total: 2.'
     ) in result.output
     assert 'Unique pyproject.toml candidates: 2.' in result.output
-    assert data['schemaVersion'] == '2.2.0'
+    assert data['schemaVersion'] == '2.3.0'
     assert data['sourceSummary'] == {
         'pluginCount': 2,
         'projectKindCounts': {'plugin': 2},

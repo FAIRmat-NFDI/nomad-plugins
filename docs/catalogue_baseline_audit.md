@@ -1,9 +1,19 @@
 # Catalogue baseline audit (2026-11-13)
 
+This manually written report records one baseline comparison. It is not a
+crawler input; follow the [refresh audit process](catalogue_review.md#audit-a-proposed-catalogue-refresh)
+for future runs.
+
 This audit accompanies [`plugin-catalogue.json`](../plugin-catalogue.json). It
 compares the current live crawl with the reference `plugin-registry.json` at
 commit `6158333`; changing GitHub, PyPI, and deployment data is not expected to
 match byte-for-byte.
+
+Later refresh (2026-11-25): step 15 regenerates the baseline as schema `2.3.0`
+with repository activity and a shared collection window. See the
+[activity refresh audit](catalogue_activity_audit.md) for its 426 records,
+identity changes, and validation. The counts and comparisons below remain a
+historical record of the original 2026-11-13 run, not the current snapshot.
 
 ## Generation and validation
 

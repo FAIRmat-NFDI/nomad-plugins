@@ -78,8 +78,33 @@ def _pyproject(name, entrypoint='parser'):
 
 
 def _run_crawl(handler, config=None):
+    def transport(request):
+        if request.url.path == '/graphql':
+            return httpx.Response(
+                200,
+                json={
+                    'data': {
+                        'repository': {
+                            'isEmpty': False,
+                            'defaultBranchRef': {
+                                'name': 'custom-branch',
+                                'target': {
+                                    '__typename': 'Commit',
+                                    'oid': 'a' * 40,
+                                    'committedDate': '2026-11-01T00:00:00Z',
+                                    'total': {'totalCount': 1},
+                                    'recent': {'totalCount': 0},
+                                },
+                            },
+                        },
+                        'rateLimit': {'cost': 1},
+                    },
+                },
+            )
+        return handler(request)
+
     async def run():
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(transport)) as http:
             async with GitHubClient(
                 'token',
                 client=http,

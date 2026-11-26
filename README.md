@@ -64,10 +64,16 @@ for repository-search limits and exclusion reporting.
 
 To compare a snapshot with an earlier catalogue and annotate visible, hidden,
 or missing records, use `plugin-catalogue review`. See the
-[baseline review guide](docs/catalogue_review.md) for the repeatable CSV review
+[baseline review guide](docs/catalogue_review.md) for the offline browser review
 workflow.
 
+## Maintaining the catalogue
+
+See the [maintainer guide](MAINTAINERS.md) for development, configuration,
+schema changes, baseline updates, and refresh-workflow troubleshooting.
+
 ## Main contributors
+
 | Name | E-mail     |
 |------|------------|
 | Hampus Näsström | [hampus.naesstroem@physik.hu-berlin.de](mailto:hampus.naesstroem@physik.hu-berlin.de)

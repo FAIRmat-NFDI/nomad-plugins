@@ -1,5 +1,27 @@
 {
   "$defs": {
+    "ActivityWindow": {
+      "properties": {
+        "end": {
+          "description": "Shared UTC cutoff, equal to dataUpdatedAt.",
+          "format": "date-time",
+          "title": "End",
+          "type": "string"
+        },
+        "start": {
+          "description": "Start of the shared 180-day UTC window.",
+          "format": "date-time",
+          "title": "Start",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end"
+      ],
+      "title": "ActivityWindow",
+      "type": "object"
+    },
     "CatalogueSourceSummary": {
       "properties": {
         "pluginCount": {
@@ -260,8 +282,56 @@
       "title": "PluginEntryPoint",
       "type": "object"
     },
+    "RepositoryActivity": {
+      "description": "Default-branch history, not a quality score or project-specific count.",
+      "properties": {
+        "lastCommitAt": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Committer timestamp of the sampled default-branch head.",
+          "title": "Lastcommitat"
+        },
+        "recentCommits": {
+          "description": "GitHub history count within the snapshot activityWindow.",
+          "minimum": 0,
+          "title": "Recentcommits",
+          "type": "integer"
+        },
+        "totalCommits": {
+          "description": "Commits reachable from the sampled default-branch head.",
+          "minimum": 0,
+          "title": "Totalcommits",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "totalCommits",
+        "recentCommits"
+      ],
+      "title": "RepositoryActivity",
+      "type": "object"
+    },
     "RepositoryStatus": {
       "properties": {
+        "activity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RepositoryActivity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "archived": {
           "title": "Archived",
           "type": "boolean"
@@ -353,6 +423,17 @@
     }
   },
   "properties": {
+    "activityWindow": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ActivityWindow"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "dataUpdatedAt": {
       "anyOf": [
         {
@@ -374,7 +455,7 @@
       "type": "array"
     },
     "schemaVersion": {
-      "const": "2.2.0",
+      "const": "2.3.0",
       "title": "Schemaversion",
       "type": "string"
     },

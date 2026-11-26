@@ -2,7 +2,7 @@ import asyncio
 from collections import Counter
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import quote, urlparse
@@ -21,6 +21,7 @@ from pydantic import (
 )
 from pydantic.json_schema import SkipJsonSchema
 
+from nomad_plugins.activity import ActivityWindow, RepositoryActivity
 from nomad_plugins.config import (
     CatalogueConfig,
     CatalogueCurationConfig,
@@ -28,6 +29,7 @@ from nomad_plugins.config import (
     load_catalogue_config,
 )
 from nomad_plugins.github import (
+    GitHubActivitySample,
     GitHubClient,
     GitHubError,
     GitHubNotFoundError,
@@ -73,6 +75,7 @@ class RepositoryStatus(BaseModel):
     created_at: datetime | None = Field(default=None, alias='createdAt')
     last_pushed_at: datetime | None = Field(default=None, alias='lastPushedAt')
     default_branch: str | None = Field(default=None, alias='defaultBranch')
+    activity: RepositoryActivity | None = None
     parent_repository_url: HttpUrl | None = Field(
         default=None,
         alias='parentRepositoryUrl',
@@ -147,6 +150,8 @@ class CrawlResult:
     repository_search_diagnostics: list['RepositoryQueryDiagnostics'] = field(
         default_factory=list
     )
+    activity_window: ActivityWindow | None = None
+    activity_query_cost: int = 0
 
 
 @dataclass(frozen=True)
@@ -718,6 +723,9 @@ async def _find_plugins(
     github_client: GitHubClient,
     config: CatalogueConfig,
 ) -> CrawlResult:
+    activity_window = ActivityWindow.ending_at(
+        datetime.now(timezone.utc).replace(microsecond=0)
+    )
     example_task = fetch_nomad_deployment_packages(
         str(config.deployment_sources.example_oasis_info_url)
     )
@@ -821,9 +829,62 @@ async def _find_plugins(
         )
         plugins[plugin.id] = plugin
 
+    enriched_plugins, activity_query_cost = await enrich_repository_activity(
+        [plugins[plugin_id] for plugin_id in sorted(plugins)],
+        github_client,
+        activity_window,
+    )
     return CrawlResult(
-        plugins=[plugins[plugin_id] for plugin_id in sorted(plugins)],
+        plugins=enriched_plugins,
         search_diagnostics=search_diagnostics,
         unique_candidate_count=len(search_items),
         repository_search_diagnostics=repository_discovery.diagnostics,
+        activity_window=activity_window,
+        activity_query_cost=activity_query_cost,
     )
+
+
+async def enrich_repository_activity(
+    plugins: list[Plugin],
+    github_client: GitHubClient,
+    window: ActivityWindow,
+) -> tuple[list[Plugin], int]:
+    """Sample each exported repository once, including hidden/curated records."""
+    repository_names = sorted(
+        {
+            plugin.id.split('#', 1)[0].removeprefix('github.com/').casefold()
+            for plugin in plugins
+        }
+    )
+    limit = asyncio.Semaphore(4)
+    with click.progressbar(
+        length=len(repository_names), label='Fetching repository activity'
+    ) as bar:
+
+        async def sample(repository: str) -> GitHubActivitySample:
+            async with limit:
+                result = await github_client.fetch_repository_activity(
+                    repository, window=window
+                )
+                bar.update(1)
+                return result
+
+        samples = await asyncio.gather(*(sample(name) for name in repository_names))
+    by_repository = dict(zip(repository_names, samples, strict=True))
+    enriched = []
+    for plugin in plugins:
+        repository = plugin.id.split('#', 1)[0].removeprefix('github.com/').casefold()
+        result = by_repository[repository]
+        enriched.append(
+            plugin.model_copy(
+                update={
+                    'status': plugin.status.model_copy(
+                        update={
+                            'activity': result.activity,
+                            'default_branch': result.default_branch,
+                        }
+                    )
+                }
+            )
+        )
+    return enriched, sum(result.query_cost for result in samples)

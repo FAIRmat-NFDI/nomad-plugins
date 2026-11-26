@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, call, patch
 
@@ -18,6 +19,7 @@ from nomad_plugins.crawler import (
     find_plugins,
 )
 from nomad_plugins.github import (
+    GitHubActivitySample,
     GitHubError,
     GitHubRepositorySummary,
     GitHubSearchDiagnostics,
@@ -80,6 +82,18 @@ def test_find_plugins_deduplicates_queries_and_keeps_nested_projects():
             ]
         ),
         fetch_repository=AsyncMock(return_value=SimpleNamespace()),
+        fetch_repository_activity=AsyncMock(
+            return_value=GitHubActivitySample(
+                activity={
+                    'totalCommits': 5,
+                    'recentCommits': 2,
+                    'lastCommitAt': '2026-11-01T00:00:00Z',
+                },
+                head_sha='a' * 40,
+                default_branch='main',
+                query_cost=1,
+            )
+        ),
     )
     config = CatalogueConfig(
         github=GitHubDiscoveryConfig(
@@ -111,6 +125,14 @@ def test_find_plugins_deduplicates_queries_and_keeps_nested_projects():
         call(secondary_query, request_delay_seconds=1.0),
     ]
     github_client.fetch_repository.assert_awaited_once_with('example/monorepo')
+    github_client.fetch_repository_activity.assert_awaited_once_with(
+        'example/monorepo', window=result.activity_window
+    )
+    assert result.activity_window is not None
+    assert result.activity_window.end <= datetime.now(timezone.utc)
+    assert result.activity_query_cost == 1
+    expected_activity = github_client.fetch_repository_activity.return_value.activity
+    assert all(plugin.status.activity == expected_activity for plugin in result.plugins)
     assert {
         str(awaited.kwargs['item'].url) for awaited in get_plugin.await_args_list
     } == {

@@ -9,6 +9,8 @@ from typing import Any, Literal
 import httpx
 from pydantic import BaseModel, Field, HttpUrl, ValidationError
 
+from nomad_plugins.activity import ActivityWindow, RepositoryActivity
+
 GITHUB_API_BASE_URL = 'https://api.github.com'
 GITHUB_API_VERSION = '2022-11-28'
 GITHUB_CODE_SEARCH_LIMIT = 1000
@@ -19,6 +21,31 @@ DEFAULT_REQUEST_TIMEOUT = 30.0
 DEFAULT_RETRY_BACKOFF = 0.25
 MAX_RETRY_DELAY = 30.0
 RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+
+# Both counts are resolved from the same Commit object, even if the branch moves
+# during a crawl. Only counts are requested, not pages of commit objects.
+REPOSITORY_ACTIVITY_QUERY = """
+query RepositoryActivity(
+  $owner: String!, $name: String!, $since: GitTimestamp!, $until: GitTimestamp!
+) {
+  repository(owner: $owner, name: $name) {
+    isEmpty
+    defaultBranchRef {
+      name
+      target {
+        __typename
+        ... on Commit {
+          oid
+          committedDate
+          total: history(first: 1) { totalCount }
+          recent: history(first: 1, since: $since, until: $until) { totalCount }
+        }
+      }
+    }
+  }
+  rateLimit { cost }
+}
+"""
 
 
 class GitHubError(RuntimeError):
@@ -103,6 +130,13 @@ class GitHubRepositoryDetails(BaseModel):
     default_branch: str | None = None
     parent: GitHubRepositoryLink | None = None
     source: GitHubRepositoryLink | None = None
+
+
+class GitHubActivitySample(BaseModel):
+    activity: RepositoryActivity
+    head_sha: str | None = Field(pattern=r'^[0-9a-fA-F]{40}$')
+    default_branch: str | None = Field(min_length=1)
+    query_cost: int = Field(ge=0, strict=True)
 
 
 @dataclass(frozen=True)
@@ -324,6 +358,75 @@ class GitHubClient:
             f'{self.base_url}/repos/{repository_full_name}',
         )
         return self._validate_response(GitHubRepositoryDetails, response)
+
+    async def fetch_repository_activity(
+        self,
+        repository_full_name: str,
+        *,
+        window: ActivityWindow,
+    ) -> GitHubActivitySample:
+        """Read one repository's default-branch history through GraphQL."""
+        owner, name = repository_full_name.split('/', 1)
+        try:
+            response = await self._request(
+                'POST',
+                f'{self.base_url}/graphql',
+                json={
+                    'query': REPOSITORY_ACTIVITY_QUERY,
+                    'variables': {
+                        'owner': owner,
+                        'name': name,
+                        'since': window.start.isoformat(),
+                        'until': window.end.isoformat(),
+                    },
+                },
+            )
+        except GitHubError as exc:
+            raise GitHubError(
+                f'GitHub activity for {repository_full_name!r} failed: {exc}'
+            ) from exc
+
+        try:
+            payload = response.json()
+            if not isinstance(payload, dict):
+                raise ValueError('GraphQL response must be an object')
+            # GraphQL can return HTTP 200 with errors and partial data. Neither
+            # partial data nor permission/rate-limit failures are zero activity.
+            if payload.get('errors'):
+                raise ValueError(f'GraphQL errors: {payload["errors"]}')
+            data = payload['data']
+            repository = data['repository']
+            branch = repository['defaultBranchRef']
+            if repository['isEmpty'] is True and branch is None:
+                return GitHubActivitySample(
+                    activity=RepositoryActivity(total_commits=0, recent_commits=0),
+                    head_sha=None,
+                    default_branch=None,
+                    query_cost=data['rateLimit']['cost'],
+                )
+            if repository['isEmpty'] is not False or branch is None:
+                raise ValueError('Non-empty repository has no default-branch history')
+            commit = branch['target']
+            if commit['__typename'] != 'Commit':
+                raise ValueError('Default branch does not point to a Commit')
+            activity = RepositoryActivity(
+                total_commits=commit['total']['totalCount'],
+                recent_commits=commit['recent']['totalCount'],
+                last_commit_at=commit['committedDate'],
+            )
+            if activity.total_commits == 0:
+                raise ValueError('A default-branch head must have non-empty history')
+            return GitHubActivitySample(
+                activity=activity,
+                head_sha=commit['oid'],
+                default_branch=branch['name'],
+                query_cost=data['rateLimit']['cost'],
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise GitHubError(
+                f'GitHub activity for {repository_full_name!r} returned an invalid '
+                f'or incomplete response: {exc}'
+            ) from exc
 
     async def _request(
         self,

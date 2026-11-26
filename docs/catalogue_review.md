@@ -32,6 +32,134 @@ confirmed curation or crawler changes, regression tests, and a regenerated
 catalogue snapshot where appropriate. The committed `plugin-catalogue.json`
 is catalogue data and is separate from the local `catalogue-review.json`.
 
+## Audit a proposed catalogue refresh
+
+An audit is a sequence of automated checks and human review, not an additional
+crawler mode. `--audit-searches` explains discovery outcomes; `validate` checks
+the data contract. Neither confirms that every listed project is a usable,
+independently maintained plugin. The review page helps investigate that question.
+
+Use the following process when changing discovery/enrichment or assessing a
+new baseline. A routine monthly update uses the same checks, but need not repeat
+unchanged implementation tests manually or create another audit document.
+
+### 1. Check the implementation and live API boundary
+
+For code changes, run the offline suite first:
+
+```sh
+uv run ruff format --check .
+uv run ruff check .
+uv run pytest
+```
+
+When changing GitHub activity access, run the bounded smoke check before a full
+crawl, in a shell with `GITHUB_TOKEN` set:
+
+```sh
+uv run python scripts/check_repository_activity.py
+```
+
+Check authentication, counts, elapsed times, and query costs. This is a live,
+read-only check of three repositories, not the full catalogue audit. Resolve
+failures before proceeding; never share the token or include it in a report.
+
+### 2. Generate and validate a candidate, not the committed baseline
+
+From the repository root, write the candidate and diagnostics into the reusable
+ignored workspace:
+
+```sh
+mkdir -p outputs/catalogue-review-local
+uv run plugin-catalogue crawl --audit-searches \
+  --output outputs/catalogue-review-local/candidate.json \
+  > outputs/catalogue-review-local/crawl.log 2>&1 && \
+uv run plugin-catalogue validate \
+  --input outputs/catalogue-review-local/candidate.json
+```
+
+Only continue after both commands succeed. A failed crawl preserves an existing
+output file, so the presence of `candidate.json` alone does not prove that the
+latest run succeeded. Stop on authentication, API, incomplete-result, enrichment,
+or validation failures; do not promote an earlier candidate accidentally.
+
+Read `crawl.log` for capped searches, skipped or invalid metadata, warnings,
+final counts, and reported GraphQL cost. Investigate new
+skipped cases rather than assuming a successful exit means nothing was omitted.
+An intentional repository-search cap is a documented inventory limitation,
+not evidence of exhaustive discovery.
+
+### 3. Compare and investigate
+
+Export any unsaved browser decisions before replacing `index.html`. Then build
+the comparison against the still-unchanged committed baseline:
+
+```sh
+uv run plugin-catalogue review \
+  --input outputs/catalogue-review-local/candidate.json \
+  --reference plugin-catalogue.json \
+  --output outputs/catalogue-review-local/index.html
+```
+
+Add `--previous outputs/catalogue-review-local/catalogue-review.json` if you
+already have saved decisions. Keep them separate from catalogue snapshots.
+
+Review additions, absences, visibility/classification changes, hidden plugins,
+warnings, and suspicious links. Check repository/source metadata for material
+differences and distinguish changed upstream data from changed crawler policy.
+For a newly enriched full crawl, verify that all exported records have activity,
+that projects in one repository share the same activity, and that the global
+window and collection timestamp are consistent. Schema validation checks count
+types and invariants, but optional historical fields mean it does not by itself
+require full activity coverage.
+
+Verify suspected repository moves using GitHub redirects or repository IDs;
+similar names or commit counts alone are not sufficient. Investigate missing
+previously visible entries. A public 404 does not establish whether a repository
+was deleted or made private. Preserve uncertainty in the review notes.
+
+Record verdicts and evidence in the browser and export the latest decisions.
+Blank verdicts remain unreviewed, not implicitly approved. If findings require
+a policy or curation change, implement it with regression tests, then repeat
+the crawl, validation, and comparison. Do not hand-edit generated records to
+make the comparison look right.
+
+### 4. Promote the validated result and record the outcome
+
+After accepting the technical checks and accounting for material differences,
+copy the candidate unchanged into the committed artifact and validate again:
+
+```sh
+cp outputs/catalogue-review-local/candidate.json plugin-catalogue.json && \
+uv run plugin-catalogue validate --input plugin-catalogue.json
+```
+
+Commit the generated catalogue with any relevant code, tests, configuration,
+and regenerated schema. Preserve the candidate's timestamp/window; do not
+transplant activity onto an older snapshot and present that as a new full crawl.
+
+Describe the date, exact commands/configuration, counts, search limitations,
+warnings, checks performed, explained removals/moves, and remaining uncertainty
+in the refresh or implementation PR. Report the token environment-variable name,
+never its value. Approval of the refresh does not assert that every unchanged
+or unreviewed record has been individually validated.
+
+A significant baseline or schema change may also warrant a concise, reviewed
+Markdown report in Git. The [baseline audit](catalogue_baseline_audit.md) and
+[activity audit](catalogue_activity_audit.md) are manually written historical
+reports of particular runs, not files generated or consumed by the crawler.
+They are not required inputs, and a new Markdown report is not required for
+each monthly refresh. Normal refresh summaries can live in the PR description.
+
+Raw logs, candidate snapshots, HTML, reviewer JSON, optional move mappings,
+and supplementary findings stay local/ignored. `candidate.json` and `crawl.log`
+are temporary working files, not another archive to maintain. After promotion,
+Git preserves the accepted catalogue; retain your latest reviewer JSON as the
+portable backup of decisions.
+
+The scheduled/manual workflow automates crawling, contract validation, and an
+update PR. It does not perform this human triage or certify plugin quality.
+
 ## Generate the review page
 
 Generate a self-contained HTML page from the repository root:
